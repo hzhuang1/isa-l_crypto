@@ -42,6 +42,7 @@ include mh_sha256/Makefile.am
 include rolling_hash/Makefile.am
 include sm3_mb/Makefile.am
 include aes/Makefile.am
+include xxhash_mb/Makefile.am
 
 # LIB version info not necessarily the same as package version
 LIBISAL_CURRENT=2
