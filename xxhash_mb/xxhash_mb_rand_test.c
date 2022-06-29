@@ -70,6 +70,7 @@ static struct buf_list *alloc_buffer(int nums)
 	for (i = 0; i < nums; i++) {
 		list[i].next = NULL;
 		list[i].size = (size_t)(rand() / 100000);
+		list[i].size = 256;
 		if (list[i].size > MAX_BUF_SIZE)
 			list[i].size = MAX_BUF_SIZE;
 		else if (list[i].size < MIN_BUF_SIZE)
@@ -112,7 +113,8 @@ static void fill_rand_buffer(struct buf_list *list)
 		if (p->addr) {
 			u = (unsigned char *)p->addr;
 			for (i = 0; i < p->size; i++)
-				u[i] = (unsigned char)rand();
+				u[i] = (unsigned char)0xa7;
+				//u[i] = (unsigned char)rand();
 		}
 		p = p->next;
 	}
@@ -146,13 +148,18 @@ static int verify_digest(struct buf_list *list, uint32_t digest)
 	return -EINVAL;
 }
 
+struct ctx_user_data {
+	uint32_t	seed;
+};
+
 int run_single_ctx(void)
 {
 	struct buf_list *list;
 	XXH32_HASH_CTX_MGR *mgr;
 	XXH32_HASH_CTX ctx;
+	struct ctx_user_data udata;
 	int ret, i, flags;
-	int buf_cnt = 15;
+	int buf_cnt = 1;
 
 	list = alloc_buffer(buf_cnt);
 	if (!list) {
@@ -169,6 +176,7 @@ int run_single_ctx(void)
 	}
 	xxh32_ctx_mgr_init(mgr);
 	hash_ctx_init(&ctx);
+	ctx.seed = 0;
 	for (i = 0; i < buf_cnt; i++) {
 		if (buf_cnt == 1)
 			flags = HASH_ENTIRE;
@@ -178,11 +186,14 @@ int run_single_ctx(void)
 			flags = HASH_LAST;
 		else
 			flags = HASH_UPDATE;
+printf("#%s, %d, size:0x%lx\n", __func__, __LINE__, list[i].size);
 		xxh32_ctx_mgr_submit(mgr, &ctx, list[i].addr, list[i].size,
-				     0, flags);
+				     flags);
+printf("#%s, %d\n", __func__, __LINE__);
 		xxh32_ctx_mgr_flush(mgr);
+printf("#%s, %d\n", __func__, __LINE__);
 	}
-	verify_digest(list, ctx.job.result_digest[0]);
+	verify_digest(list, ctx.job.result_digest);
 	free_buffer(list);
 	return 0;
 out:

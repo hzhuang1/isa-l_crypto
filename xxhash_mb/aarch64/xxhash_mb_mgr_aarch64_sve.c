@@ -1,0 +1,333 @@
+/**********************************************************************
+  Copyright(c) 2022 Linaro Corporation All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions
+  are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in
+      the documentation and/or other materials provided with the
+      distribution.
+    * Neither the name of Linaro Corporation nor the names of its
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+  OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+  LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+  DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+  THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+**********************************************************************/
+
+#include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "xxhash_mb.h"
+
+#define LANE_INDEX_MASK			0xff
+#define LANE_LENGTH_SHIFT		8
+
+#define LANE_IS_NOT_FINISHED(state,i)				\
+		(((state->lens[i] & ~LANE_INDEX_MASK) != 0) &&	\
+		 state->ldata[i].job_in_lane != NULL)
+#define LANE_IS_FINISHED(state,i)				\
+		(((state->lens[i] & ~LANE_INDEX_MASK) == 0) &&	\
+		 state->ldata[i].job_in_lane != NULL)
+#define	LANE_IS_FREE(state,i)					\
+		(((state->lens[i] & ~LANE_INDEX_MASK) == 0) &&	\
+		 state->ldata[i].job_in_lane == NULL)
+#define LANE_IS_INVALID(state,i)				\
+		(((state->lens[i] & ~LANE_INDEX_MASK) != 0) &&	\
+		 state->ldata[i].job_in_lane == NULL)
+
+#define LANE_LENGTH(idx, len)					\
+		((len << LANE_LENGTH_SHIFT) | (idx & LANE_INDEX_MASK))
+
+#define min(a,b)            (((a) < (b)) ? (a) : (b))
+
+extern int xxh32_mb_sve_max_lanes(void);
+extern void xxh32_mb_sve(XXH32_JOB **job_vec, int job_cnt, int block_cnt, void *buf);
+
+void dump_state(XXH32_MB_JOB_MGR *state)
+{
+	int i;
+	printf("state:%p\n", state);
+	for (i = 0; i < 8; i++) {
+		printf("lane[%d] len:%d, job:%p\n", i, state->lens[i], state->ldata[i].job_in_lane);
+	}
+	printf("max lane inuse:%d, num lane inuse:%d\n", state->max_lanes_inuse, state->num_lanes_inuse);
+}
+
+void xxh32_mb_mgr_init_sve(XXH32_MB_JOB_MGR *state)
+{
+	unsigned int i;
+
+	state->max_lanes_inuse = xxh32_mb_sve_max_lanes();
+	switch (state->max_lanes_inuse) {
+	case 4:
+		// SVE128
+		state->unused_lanes[0] = 0x7f7f7f7f03020100;
+		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[4] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[5] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[6] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[7] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 8:
+		// SVE256
+		state->unused_lanes[0] = 0x0706050403020100;
+		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[4] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[5] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[6] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[7] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 16:
+		// SVE512
+		state->unused_lanes[0] = 0x0706050403020100;
+		state->unused_lanes[1] = 0x0f0e0d0c0b0a0908;
+		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[4] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[5] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[6] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[7] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 32:
+		// SVE1024
+		/* Each byte indicates a lane index that is from 0 to 31. */
+		state->unused_lanes[0] = 0x0706050403020100;
+		state->unused_lanes[1] = 0x0f0e0d0c0b0a0908;
+		state->unused_lanes[2] = 0x1716151413121110;
+		state->unused_lanes[3] = 0x1f1e1d1c1b1a1918;
+		state->unused_lanes[4] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[5] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[6] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[7] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 64:
+		// SVE2048
+		/* Each byte indicates a lane index that is from 0 to 63. */
+		state->unused_lanes[0] = 0x0706050403020100;
+		state->unused_lanes[1] = 0x0f0e0d0c0b0a0908;
+		state->unused_lanes[2] = 0x1716151413121110;
+		state->unused_lanes[3] = 0x1f1e1d1c1b1a1918;
+		state->unused_lanes[4] = 0x2726252423222120;
+		state->unused_lanes[5] = 0x2f2e2d2c2b2a2928;
+		state->unused_lanes[6] = 0x3736353433323130;
+		state->unused_lanes[7] = 0x3f3e3d3c3b3a3938;
+		break;
+	default:
+		state->max_lanes_inuse = 0;
+		return;
+	}
+
+	state->num_lanes_inuse = 0;
+	for (i = 0; i < state->max_lanes_inuse; i++) {
+		state->lens[i] = i;
+		state->ldata[i].job_in_lane = NULL;
+	}
+	for (; i < XXH32_MAX_LANES; i++) {
+		state->lens[i] = 0x7f;
+		state->ldata[i].job_in_lane = NULL;
+	}
+}
+
+void dump_buf(void *buf, size_t len)
+{
+	int i;
+	uint32_t *p;
+
+	for (i = 0; i < len; i++) {
+		if (i % 16 == 0)
+			printf("\n[0x%02x]", i);
+		if (i % 4 == 0)
+			printf(" ");
+		else if (i)
+			printf("-");
+		printf("%02x", *(uint8_t *)buf++);
+	}
+	printf("\n");
+}
+
+static int xxh32_mb_mgr_do_jobs(XXH32_MB_JOB_MGR *state)
+{
+	int min_idx, job_cnt, len, i, min_len, blocks;
+	XXH32_JOB *job_vecs[XXH32_MAX_LANES];
+	uint8_t buf[256];
+
+	if (state->num_lanes_inuse == 0)
+		return -EINVAL;
+printf("#%s, %d, max_inuse:%d, num_inuse:%d\n", __func__, __LINE__, state->max_lanes_inuse, state->num_lanes_inuse);
+	/* find the minimal length of all lanes */
+	// job_idx is the index of job_vecs[]
+	// i is the index of all lanes
+	// min_idx is the index of minimal lane length
+	for (i = 0, job_cnt = 0; i < state->max_lanes_inuse &&
+	     job_cnt < state->num_lanes_inuse; i++) {
+		if (LANE_IS_NOT_FINISHED(state, i)) {
+printf("#%s, %d, lane %d is not finished, lens:0x%x, lane->len:0x%x, buffer:%p\n", __func__, __LINE__, i, state->lens[i], state->ldata[i].job_in_lane->len, state->ldata[i].job_in_lane->buffer);
+			/*
+			 * state->lens[] is the combination of lane index
+			 * and length.
+			 * In MD5, the length must be large than 16 bytes.
+			 * Why?
+			 * Each operation in MD5 is based on 32-byte. So it's
+			 * reasonable that the minimal length is large than
+			 * 16 bytes.
+			 * In XXH32, the minimal length is also large than
+			 * 16 bytes.
+			 */
+			if (job_cnt)
+				min_len = min(min_len, state->lens[i]);
+			else
+				min_len = state->lens[i];
+			job_vecs[job_cnt++] = state->ldata[i].job_in_lane;
+		}
+	}
+printf("#%s, %d, min_len:0x%x\n", __func__, __LINE__, min_len);
+	if (min_len <= 0)
+		return -EINVAL;
+	//min_len = min_len & LANE_INDEX_MASK;
+	min_len &= ~LANE_INDEX_MASK;
+printf("#%s, %d, len:0x%x, mask:0x%x, min_len:0x%x\n", __func__, __LINE__, len, LANE_INDEX_MASK, min_len);
+	// Only block data could be accelerated by SVE instructions.
+	// Remained data should be handled in other routine.
+	blocks = min_len >> LANE_LENGTH_SHIFT;
+
+	printf("#%s, %d, blocks:%d\n", __func__, __LINE__, blocks);
+	memset(buf, 0, 256);
+	printf("#%s, %d, digest address:0x%p, 0x%p\n", __func__, __LINE__, &job_vecs[0]->digest[0], &state->ldata[0].job_in_lane->digest[0]);
+	xxh32_mb_sve(job_vecs, job_cnt, blocks, buf);
+	printf("dump vecs:\n");
+	dump_buf(&job_vecs[0]->digest[0], 256);
+	//dump_buf(job_vecs[0]->digest, 256);
+	//dump_buf(job_vecs[0]->digest, 4 * 4);
+	printf("dump buf:\n");
+	dump_buf(buf, 256);
+	printf("sve end\n");
+	//dump_buf(job_vecs[0]->buffer, XXH32_BLOCK_SIZE);
+
+	for (i = 0; i < state->max_lanes_inuse; i++) {
+		if (LANE_IS_NOT_FINISHED(state, i)) {
+printf("#%s, %d, lens:0x%x, lane->len:0x%x, buffer:%p\n", __func__, __LINE__, state->lens[i], state->ldata[i].job_in_lane->len, state->ldata[i].job_in_lane->buffer);
+			state->lens[i] -= min_len;
+			state->ldata[i].job_in_lane->len -= blocks;
+			state->ldata[i].job_in_lane->buffer +=
+						blocks << XXH32_LOG2_BLOCK_SIZE;
+printf("#%s, %d, lens:0x%x, lane->len:0x%x, buffer:%p, d[0]:0x%x, d[1]:0x%x, d[2]:0x%x, d[3]:0x%x\n",
+	__func__, __LINE__, state->lens[i], state->ldata[i].job_in_lane->len, state->ldata[i].job_in_lane->buffer,
+	state->ldata[i].job_in_lane->digest[0],
+	state->ldata[i].job_in_lane->digest[1],
+	state->ldata[i].job_in_lane->digest[2],
+	state->ldata[i].job_in_lane->digest[3]
+);
+		}
+	}
+	return 0;
+}
+
+static void xxh32_mb_mgr_insert_job(XXH32_MB_JOB_MGR *state, XXH32_JOB *job)
+{
+	int grp;
+	int lane_idx;	// unused lane index
+	int i;
+
+printf("#%s, %d, max inuse:%d\n", __func__, __LINE__, state->max_lanes_inuse);
+	for (i = 0; i < XXH32_MAX_LANES; i++) {
+		if (LANE_IS_FREE(state, i)) {
+			grp = i / LANE_LENGTH_SHIFT;
+			break;
+		}
+	}
+
+	// add job into lanes
+	lane_idx = state->unused_lanes[grp] & LANE_INDEX_MASK;
+
+	// fatal error
+	assert(lane_idx < XXH32_MAX_LANES);
+printf("#%s, %d, job->len:0x%lx\n", __func__, __LINE__, job->len);
+	state->lens[lane_idx] = LANE_LENGTH(lane_idx, job->len);
+	state->ldata[lane_idx].job_in_lane = job;
+	state->unused_lanes[grp] >>= LANE_LENGTH_SHIFT;
+	state->num_lanes_inuse++;
+printf("#%s, %d, lane %d is free, lane_idx:%d, lens:0x%lx\n", __func__, __LINE__, i, lane_idx, state->lens[lane_idx]);
+}
+
+static XXH32_JOB *xxh32_mb_mgr_free_lane(XXH32_MB_JOB_MGR * state)
+{
+        int i;
+        XXH32_JOB *ret = NULL;
+
+        for (i = 0; i < XXH32_MAX_LANES; i++) {
+		if (state->lens[i] && state->ldata[i].job_in_lane)
+			printf("lens:0x%x, job_in_lane:%p\n", state->lens[i], state->ldata[i].job_in_lane);
+                if (LANE_IS_FINISHED(state, i)) {
+                        int grp = i / 8;
+	printf("#%s, %d, free lane %d\n", __func__, __LINE__, i);
+                        state->unused_lanes[grp] <<= 8;
+                        state->unused_lanes[grp] |= i;
+                        state->num_lanes_inuse--;
+                        ret = state->ldata[i].job_in_lane;
+                        ret->status = STS_COMPLETED;
+                        state->ldata[i].job_in_lane = NULL;
+                        break;
+                }
+        }
+        return ret;
+}
+
+XXH32_JOB *xxh32_mb_mgr_submit_sve(XXH32_MB_JOB_MGR *state, XXH32_JOB *job)
+{
+	int lane_idx;
+	XXH32_JOB *ret;
+
+printf("#%s, %d enter\n", __func__, __LINE__);
+	// add job into lanes
+	xxh32_mb_mgr_insert_job(state, job);
+
+	ret = xxh32_mb_mgr_free_lane(state);
+	if (ret)
+		goto out;
+	// submit will wait data ready in all lanes
+	if (state->num_lanes_inuse < XXH32_MAX_LANES) {
+		ret = NULL;
+		goto out;
+	}
+	lane_idx = xxh32_mb_mgr_do_jobs(state);
+	printf("%s, %d, lane_idx:%d\n", __func__, __LINE__, lane_idx);
+	ret = xxh32_mb_mgr_free_lane(state);
+out:
+printf("#%s, %d exit\n", __func__, __LINE__);
+	return ret;
+}
+
+XXH32_JOB *xxh32_mb_mgr_flush_sve(XXH32_MB_JOB_MGR * state)
+{
+	XXH32_JOB *ret;
+
+printf("#%s, %d\n", __func__, __LINE__);
+	ret = xxh32_mb_mgr_free_lane(state);
+	if (ret) {
+printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
+		return ret;
+	}
+
+printf("#%s, %d\n", __func__, __LINE__);
+	xxh32_mb_mgr_do_jobs(state);
+	return xxh32_mb_mgr_free_lane(state);
+}

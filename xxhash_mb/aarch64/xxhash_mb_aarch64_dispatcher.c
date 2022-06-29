@@ -28,20 +28,37 @@
 **********************************************************************/
 #include <aarch64_multibinary.h>
 
+#define SVE_CPUID_MASK		(0xFUL << 32)
+
 DEFINE_INTERFACE_DISPATCHER(xxh32_ctx_mgr_init)
 {
-	return PROVIDER_BASIC(xxh32_ctx_mgr_init);
+	uint64_t cpuid;
 
+	__asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(cpuid));
+	if (cpuid & SVE_CPUID_MASK)
+		return PROVIDER_INFO(xxh32_ctx_mgr_init_sve);
+
+	return PROVIDER_BASIC(xxh32_ctx_mgr_init);
 }
 
 DEFINE_INTERFACE_DISPATCHER(xxh32_ctx_mgr_submit)
 {
-	return PROVIDER_BASIC(xxh32_ctx_mgr_submit);
+	uint64_t cpuid;
 
+	__asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(cpuid));
+	if (cpuid & SVE_CPUID_MASK)
+		return PROVIDER_INFO(xxh32_ctx_mgr_submit_sve);
+
+	return PROVIDER_BASIC(xxh32_ctx_mgr_submit);
 }
 
 DEFINE_INTERFACE_DISPATCHER(xxh32_ctx_mgr_flush)
 {
-	return PROVIDER_BASIC(xxh32_ctx_mgr_flush);
+	uint64_t cpuid;
 
+	__asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(cpuid));
+	if (cpuid & SVE_CPUID_MASK)
+		return PROVIDER_INFO(xxh32_ctx_mgr_flush_sve);
+
+	return PROVIDER_BASIC(xxh32_ctx_mgr_flush);
 }

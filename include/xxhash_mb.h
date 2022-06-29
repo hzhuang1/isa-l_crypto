@@ -52,7 +52,8 @@ extern "C" {
 
 #define XXH32_DIGEST_NWORDS	4
 #define XXH32_MAX_LANES		32
-#define XXH32_BLOCK_SIZE	64
+#define XXH32_BLOCK_SIZE	256	// for SVE2048
+#define XXH32_LOG2_BLOCK_SIZE	8	// for SVE2048
 
 #define XXH64_DIGEST_NWORDS	4
 #define XXH64_MAX_LANES		16
@@ -68,7 +69,9 @@ typedef uint64_t xxh64_digest_array[XXH64_DIGEST_NWORDS][XXH64_MAX_LANES];
 typedef struct {
 	uint8_t*  buffer;       //!< pointer to data buffer for this job
 	uint32_t  len;          //!< length of buffer for this job in blocks.
-	DECLARE_ALIGNED(uint32_t result_digest[XXH32_DIGEST_NWORDS],64);
+	DECLARE_ALIGNED(uint32_t digest[XXH32_DIGEST_NWORDS * 4],16);
+	//DECLARE_ALIGNED(uint32_t digest[XXH32_DIGEST_NWORDS],64);
+	uint32_t  result_digest;//!< final digest
 	JOB_STS   status;       //!< output job status
 	void*     user_data;    //!< pointer for user's job-related data
 } XXH32_JOB;
@@ -90,13 +93,17 @@ typedef struct {
 
 typedef struct {
 	XXH32_MB_ARGS_X32 args;
+	XXH32_LANE_DATA ldata[XXH32_MAX_LANES];
+	/*
+	 * each byte is index (0...63) of unused lanes,
+	 * byte is set to 0x3F as a flag.
+	 */
+	uint64_t unused_lanes[8];
 	uint32_t lens[XXH32_MAX_LANES];
 	/*
-	 * each nibble is index (0...3 or 0...7 or 0...15) of unused lanes,
-	 * nibble 4 or 8 is set to F as a flag.
+	 * SVE vector could be vary among 128b, 256b, 512b, 1024b, 2048b.
 	 */
-	uint64_t unused_lanes;
-	XXH32_LANE_DATA ldata[XXH32_MAX_LANES];
+	uint32_t max_lanes_inuse;
 	uint32_t num_lanes_inuse;
 } XXH32_MB_JOB_MGR;
 
@@ -121,8 +128,9 @@ typedef struct {
 	uint32_t       incoming_buffer_length; //!< length of buffer for this job in bytes.
 	uint8_t        partial_block_buffer[XXH32_BLOCK_SIZE * 2]; //!< CTX partial blocks
 	uint32_t       partial_block_buffer_length;
-	uint32_t       v[4];            //!< Accumulator lanes
+	//uint32_t       v[4];            //!< Accumulator lanes
 	uint32_t       large_len;       //!< Whether the hash is >=16
+	uint32_t       seed;            //!< Seed value
 	void*          user_data;       //!< pointer for user to keep any job-related data
 } XXH32_HASH_CTX;
 
@@ -158,10 +166,10 @@ typedef struct {
 	XXH64_MB_ARGS_X16 args;
 	uint32_t lens[XXH64_MAX_LANES];
 	/*
-	 * each nibble is index (0...3 or 0...7 or 0...15) of unused lanes,
+	 * each nibble is index (0...31) of unused lanes,
 	 * nibble 4 or 8 is set to F as a flag.
 	 */
-	uint64_t unused_lanes;
+	uint64_t unused_lanes[8];
 	XXH64_LANE_DATA ldata[XXH64_MAX_LANES];
 	uint32_t num_lanes_inuse;
 } XXH64_MB_JOB_MGR;
@@ -217,7 +225,6 @@ XXH32_HASH_CTX* xxh32_ctx_mgr_submit(XXH32_HASH_CTX_MGR* mgr,
 				     XXH32_HASH_CTX* ctx,
 				     const void* buffer,
 				     uint32_t len,
-				     uint32_t seed,
 				     HASH_CTX_FLAG flags);
 
 /**

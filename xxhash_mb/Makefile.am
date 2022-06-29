@@ -28,7 +28,10 @@
 ########################################################################
 
 lsrc_aarch64 += xxhash_mb/xxhash_ctx_base.c \
+		xxhash_mb/aarch64/xxhash_ctx_aarch64_sve.c \
 		xxhash_mb/aarch64/xxhash_mb_aarch64_dispatcher.c \
+		xxhash_mb/aarch64/xxhash_mb_mgr_aarch64_sve.c \
+		xxhash_mb/aarch64/xxhash_mb_sve.S \
 		xxhash_mb/aarch64/xxhash_mb_multibinary.S
 
 lsrc_base_aliases += xxhash_mb/xxhash_ctx_base.c \

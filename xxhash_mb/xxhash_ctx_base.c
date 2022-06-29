@@ -121,7 +121,7 @@ int xxh32_update(XXH32_HASH_CTX *ctx, const void *input, size_t length);
  *
  * Return: The xxh32 hash stored in the state.
  */
-void xxh32_digest(const XXH32_HASH_CTX *ctx);
+void xxh32_digest(XXH32_HASH_CTX *ctx);
 
 /**
  * xxh64_reset() - reset the xxh64 state to start a new hashing operation
@@ -246,7 +246,10 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_flush_base(XXH32_HASH_CTX_MGR *mgr)
 void xxh32_reset(XXH32_HASH_CTX *ctx, uint32_t seed)
 {
 	// Init digest
-	ctx->job.result_digest[0] = 0;
+	ctx->job.digest[0] = seed + PRIME32_1 + PRIME32_2;
+	ctx->job.digest[1] = seed + PRIME32_2;
+	ctx->job.digest[2] = seed + 0;
+	ctx->job.digest[3] = seed - PRIME32_1;
 
 	// Reset byte counter
 	ctx->total_length = 0;
@@ -259,11 +262,6 @@ void xxh32_reset(XXH32_HASH_CTX *ctx, uint32_t seed)
 
 	// Mark it as processing
 	ctx->status = HASH_CTX_STS_PROCESSING;
-
-	ctx->v[0] = seed + PRIME32_1 + PRIME32_2;
-	ctx->v[1] = seed + PRIME32_2;
-	ctx->v[2] = seed + 0;
-	ctx->v[3] = seed - PRIME32_1;
 }
 
 static uint32_t xxh32_round(uint32_t seed, const uint32_t input)
@@ -302,13 +300,17 @@ int xxh32_update(XXH32_HASH_CTX *ctx, const void *input, size_t len)
 		{
 			const uint32_t *p32 =
 				(const uint32_t *)ctx->partial_block_buffer;
-			ctx->v[0] = xxh32_round(ctx->v[0], *p32);
+			ctx->job.digest[0] = xxh32_round(
+						ctx->job.digest[0], *p32);
 			p32++;
-			ctx->v[1] = xxh32_round(ctx->v[1], *p32);
+			ctx->job.digest[1] = xxh32_round(
+						ctx->job.digest[1], *p32);
 			p32++;
-			ctx->v[2] = xxh32_round(ctx->v[2], *p32);
+			ctx->job.digest[2] = xxh32_round(
+						ctx->job.digest[2], *p32);
 			p32++;
-			ctx->v[3] = xxh32_round(ctx->v[3], *p32);
+			ctx->job.digest[3] = xxh32_round(
+						ctx->job.digest[3], *p32);
 		}
 		p += 16 - ctx->partial_block_buffer_length;
 		ctx->partial_block_buffer_length = 0;
@@ -318,13 +320,17 @@ int xxh32_update(XXH32_HASH_CTX *ctx, const void *input, size_t len)
 		const uint8_t *const limit = b_end - 16;
 
 		do {
-			ctx->v[0] = xxh32_round(ctx->v[0], *(uint32_t *)p);
+			ctx->job.digest[0] = xxh32_round(
+					ctx->job.digest[0], *(uint32_t *)p);
 			p += 4;
-			ctx->v[1] = xxh32_round(ctx->v[1], *(uint32_t *)p);
+			ctx->job.digest[1] = xxh32_round(
+					ctx->job.digest[1], *(uint32_t *)p);
 			p += 4;
-			ctx->v[2] = xxh32_round(ctx->v[2], *(uint32_t *)p);
+			ctx->job.digest[2] = xxh32_round(
+					ctx->job.digest[2], *(uint32_t *)p);
 			p += 4;
-			ctx->v[3] = xxh32_round(ctx->v[3], *(uint32_t *)p);
+			ctx->job.digest[3] = xxh32_round(
+					ctx->job.digest[3], *(uint32_t *)p);
 			p += 4;
 		} while (p <= limit);
 	}
@@ -337,42 +343,43 @@ int xxh32_update(XXH32_HASH_CTX *ctx, const void *input, size_t len)
 	return 0;
 }
 
-void xxh32_digest(const XXH32_HASH_CTX *ctx)
+void xxh32_digest(XXH32_HASH_CTX *ctx)
 {
 	const uint8_t *p = (const uint8_t *)ctx->partial_block_buffer;
 	const uint8_t *const b_end = (const uint8_t *)ctx->partial_block_buffer
 				     + ctx->partial_block_buffer_length;
-	uint32_t *digest = (uint32_t *)ctx->job.result_digest;
 
 	if (ctx->large_len) {
-		*digest = XXH_rotl32(ctx->v[0], 1) +
-			  XXH_rotl32(ctx->v[1], 7) +
-			  XXH_rotl32(ctx->v[2], 12) +
-			  XXH_rotl32(ctx->v[3], 18);
+		ctx->job.result_digest = XXH_rotl32(ctx->job.digest[0], 1) +
+					XXH_rotl32(ctx->job.digest[1], 7) +
+					XXH_rotl32(ctx->job.digest[2], 12) +
+					XXH_rotl32(ctx->job.digest[3], 18);
 	} else {
 		/* seed + PRIME32_5 */
-		*digest = ctx->v[2] + PRIME32_5;
+		ctx->job.result_digest = ctx->job.digest[2] + PRIME32_5;
 	}
 
-	*digest += ctx->total_length;
+	ctx->job.result_digest += ctx->total_length;
 
 	while (p + 4 <= b_end) {
-		*digest += *(uint32_t *)p * PRIME32_3;
-		*digest = XXH_rotl32(*digest, 17) * PRIME32_4;
+		ctx->job.result_digest += *(uint32_t *)p * PRIME32_3;
+		ctx->job.result_digest = XXH_rotl32(ctx->job.result_digest, 17)
+					* PRIME32_4;
 		p += 4;
 	}
 
 	while (p < b_end) {
-		*digest += *p * PRIME32_5;
-		*digest = XXH_rotl32(*digest, 11) * PRIME32_1;
+		ctx->job.result_digest += *p * PRIME32_5;
+		ctx->job.result_digest = XXH_rotl32(ctx->job.result_digest, 11)
+					* PRIME32_1;
 		p++;
 	}
 
-	*digest ^= *digest >> 15;
-	*digest *= PRIME32_2;
-	*digest ^= *digest >> 13;
-	*digest *= PRIME32_3;
-	*digest ^= *digest >> 16;
+	ctx->job.result_digest ^= ctx->job.result_digest >> 15;
+	ctx->job.result_digest *= PRIME32_2;
+	ctx->job.result_digest ^= ctx->job.result_digest >> 13;
+	ctx->job.result_digest *= PRIME32_3;
+	ctx->job.result_digest ^= ctx->job.result_digest >> 16;
 }
 
 #if 0
