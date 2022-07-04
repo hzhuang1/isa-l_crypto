@@ -70,7 +70,6 @@ static struct buf_list *alloc_buffer(int nums)
 	for (i = 0; i < nums; i++) {
 		list[i].next = NULL;
 		list[i].size = (size_t)(rand() / 100000);
-		list[i].size = 256;
 		if (list[i].size > MAX_BUF_SIZE)
 			list[i].size = MAX_BUF_SIZE;
 		else if (list[i].size < MIN_BUF_SIZE)
@@ -102,6 +101,27 @@ static void free_buffer(struct buf_list *list)
 	free(list);
 }
 
+void init_buf(uint8_t *buf, uint8_t val, size_t len)
+{
+	for (int i = 0; i < len; i++) {
+		buf[i] = val + ((i / 8) * 0x10) + (i % 8);
+	}
+}
+
+void dump_buf(unsigned char *buf, size_t len)
+{
+        int i;
+
+        for (i = 0; i < len; i += 16) {
+                printf("[0x%x]: %02x-%02x-%02x-%02x %02x-%02x-%02x-%02x "
+                        "%02x-%02x-%02x-%02x %02x-%02x-%02x-%02x\n",
+                        i, buf[i], buf[i + 1], buf[i + 2], buf[i + 3],
+                        buf[i + 4], buf[i + 5], buf[i + 6], buf[i + 7],
+                        buf[i + 8], buf[i + 9], buf[i + 10], buf[i + 11],
+                        buf[i + 12], buf[i + 13], buf[i + 14], buf[i + 15]);
+        }
+}
+
 /* Fill random data into the whole buffer list. */
 static void fill_rand_buffer(struct buf_list *list)
 {
@@ -112,15 +132,20 @@ static void fill_rand_buffer(struct buf_list *list)
 	while (p) {
 		if (p->addr) {
 			u = (unsigned char *)p->addr;
+#if 1
 			for (i = 0; i < p->size; i++)
-				u[i] = (unsigned char)0xa7;
-				//u[i] = (unsigned char)rand();
+				u[i] = (unsigned char)rand();
+				//u[i] = (unsigned char)0xa7;
 			for (i = 0; i < p->size; i++) {
 				printf("%02x ", u[i]);
 				if (i % 16 == 0)
 					printf("\n");
 			}
 			printf("\n");
+#else
+			init_buf(u, 0x37, p->size);
+			dump_buf(u, p->size);
+#endif
 		}
 		p = p->next;
 	}

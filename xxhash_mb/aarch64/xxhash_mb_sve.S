@@ -207,6 +207,7 @@
 150:
 	// load data
 	xxh32_sparse_load  \dst, \didx, \in1, \in2, \in3, \in4, \tmp
+	mov	\dst, \tmp
 	xxh32_round_x4  \s1, \s2, \s3, \s4, \in1, \in2, \in3, \in4, \prm1, \prm2
 	subs	\cnt, \cnt, #1
 	bne	150b
