@@ -70,7 +70,6 @@ typedef struct {
 	uint8_t*  buffer;       //!< pointer to data buffer for this job
 	uint32_t  len;          //!< length of buffer for this job in blocks.
 	DECLARE_ALIGNED(uint32_t digest[XXH32_DIGEST_NWORDS * 4],16);
-	//DECLARE_ALIGNED(uint32_t digest[XXH32_DIGEST_NWORDS],64);
 	uint32_t  result_digest;//!< final digest
 	JOB_STS   status;       //!< output job status
 	void*     user_data;    //!< pointer for user's job-related data

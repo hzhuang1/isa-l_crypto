@@ -115,6 +115,12 @@ static void fill_rand_buffer(struct buf_list *list)
 			for (i = 0; i < p->size; i++)
 				u[i] = (unsigned char)0xa7;
 				//u[i] = (unsigned char)rand();
+			for (i = 0; i < p->size; i++) {
+				printf("%02x ", u[i]);
+				if (i % 16 == 0)
+					printf("\n");
+			}
+			printf("\n");
 		}
 		p = p->next;
 	}

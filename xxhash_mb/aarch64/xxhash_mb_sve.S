@@ -93,20 +93,20 @@
 .macro xxh32_alloc_on_stack  job_cnt:req, seed_buf:req, data_buf:req, tmp:req
 	// Reserve the unified seed buffer for all data lanes.
 	// Each lane costs 16-byte long.
-	mov	\tmp, \job_cnt, lsl #4
+	lsl	\tmp, \job_cnt, 4
 	sub	\seed_buf, sp, \tmp
 	// Reserve the unified data buffer for all data lanes.
 	// Each lane costs 256-byte long.
-	mov	\tmp, \job_cnt, lsl #8
+	lsl	\tmp, \job_cnt, 8
 	sub	\data_buf, \seed_buf, \tmp
-	sub	\data_buf, \data_buf, \tmp
+	//sub	\data_buf, \data_buf, \tmp
 	mov	sp, \data_buf
 .endm
 
 // Load seed from jobs into a single memory block
 // Param job_vec, job_cnt, buffer are read-only in the macro.
 // Param src, dst, tmp and cnt are updated in the macro.
-.macro xxh32_load_seed_from_jobs  job_vec:req, job_cnt, buffer:req, src:req, dst:req, tmp:req, cnt:req
+.macro xxh32_load_seed_from_jobs  job_vec:req, job_cnt:req, buffer:req, src:req, dst:req, tmp:req, cnt:req
 	// Avoid to use jobs and buffer directly. Since it may be used
 	// in multiple times.
 	mov	\src, \job_vec
@@ -126,7 +126,7 @@
 .endm
 
 // Load data from jobs into a single memory block
-.macro xxh32_load_data_from_jobs  job_vec:req, job_cnt, block_idx:req, buffer:req, src:req, dst:req, tmp:req, cnt:req
+.macro xxh32_load_data_from_jobs  job_vec:req, job_cnt:req, block_idx:req, buffer:req, src:req, dst:req, tmp:req, cnt:req
 	// Avoid to use jobs and buffer directly. Since it may be used
 	// in multiple times.
 	mov	\src, \job_vec
@@ -207,35 +207,9 @@
 150:
 	// load data
 	xxh32_sparse_load  \dst, \didx, \in1, \in2, \in3, \in4, \tmp
-	mov	\dst, \tmp
 	xxh32_round_x4  \s1, \s2, \s3, \s4, \in1, \in2, \in3, \in4, \prm1, \prm2
 	subs	\cnt, \cnt, #1
-	//bne	150b
-	dump_vec_to_jobs  \job_vec, \job_cnt, \in1, \dst, \tmp, \cnt
-.endm
-
-// dump 128-bit data
-.macro dump_vec_to_jobs  job_vec, job_cnt, vec, dst, tmp, cnt
-	mov	\dst, \job_vec
-	mov	\cnt, \job_cnt
-	ptrue	p1.b
-200:
-	ldr	\tmp, [\dst], 8
-	add	\tmp, \tmp, #16
-	st1b	\vec\().b, p1, [\tmp]
-	subs	\cnt, \cnt, 1
-	bne	200b
-.endm
-
-.macro dump_vec  vec, dst, tmp, cnt
-	mov	\tmp, \dst
-	mov	\cnt, 16
-	ptrue	p1.b
-220:
-	st1b	\vec\().b, p1, [\tmp]
-	add	\tmp, \tmp, 16
-	subs	\cnt, \cnt, 16
-	bne	220b
+	bne	150b
 .endm
 
 // int xxh32_mb_sve_max_lanes()
@@ -304,11 +278,6 @@ xxh32_mb_sve:
 	xxh32_init_data_index z12, w6
 
 	xxh32_load_seed_from_jobs  x0, x1, x4, x7, x8, x6, x10
-/*
-	dump_vec_to_jobs  x0, x1, z2, x8, x6, x10
-	dump_vec  z2, x3, x6, x10
-	b	90f
-*/
 	// Load sparse seeds into vector registers.
 	xxh32_sparse_load  x4, z2, z3, z4, z5, z6, x6
 
@@ -318,7 +287,7 @@ xxh32_mb_sve:
 	xxh32_single  x0, x1, x11, x5, z12, z0, z1, z3, z4, z5, z6, z7, z8, z9, z10, x7, x8, x6, x10
 	add	x11, x11, #1
 	cmp	x11, x2
-	//bne	10b
+	bne	10b
 
 	// Save sparse seeds from vector registers to a memory block.
 	xxh32_sparse_save  x4, z2, z3, z4, z5, z6, x6

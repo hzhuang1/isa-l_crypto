@@ -108,11 +108,16 @@ printf("#%s, %d, len:%d, result digest:0x%x, partial_block_buffer_length:%d\n", 
 			XXH_rotl32(ctx->job.digest[1], 7) +
 			XXH_rotl32(ctx->job.digest[2], 12) +
 			XXH_rotl32(ctx->job.digest[3], 18);
+	} else if ((len % 16 < 16) && (ctx->total_length >= 256)) {
+		h32 = XXH_rotl32(ctx->job.digest[0], 1) +
+			XXH_rotl32(ctx->job.digest[1], 7) +
+			XXH_rotl32(ctx->job.digest[2], 12) +
+			XXH_rotl32(ctx->job.digest[3], 18);
 	} else
 		h32 = ctx->job.result_digest;
 
-	h32 += len;
-printf("#%s, %d, h32:0x%x, prime32_5:0x%x\n", __func__, __LINE__, h32, PRIME32_5);
+	h32 += ctx->total_length;
+printf("#%s, %d, h32:0x%x\n", __func__, __LINE__, h32);
 
 	while (p + 4 <= b_end) {
 		h32 += *(uint32_t *)p * PRIME32_3;
@@ -132,6 +137,7 @@ printf("uint32_t p:0x%x, h32:0x%x\n", *(uint32_t *)p, h32);
 	h32 ^= h32 >> 13;
 	h32 *= PRIME32_3;
 	h32 ^= h32 >> 16;
+printf("#%s, %d, h32:0x%x\n", __func__, __LINE__, h32);
 	ctx->job.result_digest = h32;
 }
 
@@ -337,6 +343,7 @@ static XXH32_HASH_CTX *xxh32_ctx_mgr_resubmit(XXH32_HASH_CTX_MGR *mgr,
 								&mgr->mgr,
 								&ctx->job);
 			printf("#%s, %d, status:0x%x\n", __func__, __LINE__, ctx->status);
+					xxh32_ctx_get_hash(ctx, buf, ctx->partial_block_buffer_length);
 				}
 			}
 			continue;
