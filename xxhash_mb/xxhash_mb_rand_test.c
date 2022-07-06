@@ -70,11 +70,13 @@ static struct buf_list *alloc_buffer(int nums)
 	for (i = 0; i < nums; i++) {
 		list[i].next = NULL;
 		list[i].size = (size_t)(rand() / 100000);
+		list[i].size = 256;
 		if (list[i].size > MAX_BUF_SIZE)
 			list[i].size = MAX_BUF_SIZE;
 		else if (list[i].size < MIN_BUF_SIZE)
 			list[i].size = MIN_BUF_SIZE;
 		list[i].addr = malloc(list[i].size);
+printf("list[%d] addr:%p\n", i, list[i].addr);
 		if (!list[i].addr)
 			goto out;
 		if (i > 0)
@@ -132,7 +134,7 @@ static void fill_rand_buffer(struct buf_list *list)
 	while (p) {
 		if (p->addr) {
 			u = (unsigned char *)p->addr;
-#if 1
+#if 0
 			for (i = 0; i < p->size; i++)
 				u[i] = (unsigned char)rand();
 				//u[i] = (unsigned char)0xa7;
@@ -143,7 +145,8 @@ static void fill_rand_buffer(struct buf_list *list)
 			}
 			printf("\n");
 #else
-			init_buf(u, 0x37, p->size);
+			init_buf(u, 0x37 + p->addr, p->size);
+			//init_buf(u, 0x37, p->size);
 			dump_buf(u, p->size);
 #endif
 		}
@@ -232,8 +235,63 @@ out:
 	return ret;
 }
 
+#define JOB_CNT		2
+int run_multi_ctx(void)
+{
+	struct buf_list *listpool[JOB_CNT];
+	XXH32_HASH_CTX_MGR *mgr;
+	XXH32_HASH_CTX ctxpool[JOB_CNT];
+	struct ctx_user_data udata;
+	int ret, i, flags;
+	int buf_cnt = 1;
+
+	printf("%s:\n", __func__);
+	for (i = 0; i < JOB_CNT; i++) {
+		listpool[i] = alloc_buffer(buf_cnt);
+		if (!listpool[i]) {
+			fprintf(stderr, "Fail to allocate a buffer list!\n");
+			ret = -ENOMEM;
+			goto out;
+		}
+		fill_rand_buffer(listpool[i]);
+	}
+
+	mgr = aligned_alloc(16, sizeof(XXH32_HASH_CTX_MGR));
+	if (!mgr) {
+		fprintf(stderr, "Fail to allocate mgr!\n");
+		ret = -ENOMEM;
+		goto out_mgr;
+	}
+	xxh32_ctx_mgr_init(mgr);
+	for (i = 0; i < JOB_CNT; i++) {
+		hash_ctx_init(&ctxpool[i]);
+		flags = HASH_ENTIRE;
+		xxh32_ctx_mgr_submit(mgr, &ctxpool[i], listpool[i][0].addr,
+				listpool[i][0].size, flags);
+	}
+	//xxh32_ctx_mgr_flush(mgr);
+	while (xxh32_ctx_mgr_flush(mgr));
+	for (i = 0; i < JOB_CNT; i++) {
+		printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
+		ret = verify_digest(listpool[i], ctxpool[i].job.result_digest);
+		if (ret < 0)
+			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
+	}
+	for (i = 0; i < JOB_CNT; i++)
+		free_buffer(listpool[i]);
+	return 0;
+out_verify:
+out_mgr:
+	i = JOB_CNT;
+out:
+	for (; i > 0; i--)
+		free_buffer(listpool[i - 1]);
+	return ret;
+}
+
 int main(void)
 {
 	run_single_ctx();
+	run_multi_ctx();
 	return 0;
 }
