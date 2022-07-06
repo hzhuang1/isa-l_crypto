@@ -141,7 +141,7 @@ void xxh32_mb_mgr_init_sve(XXH32_MB_JOB_MGR *state)
 		state->lens[i] = i;
 		state->ldata[i].job_in_lane = NULL;
 	}
-	for (; i < XXH32_MAX_LANES; i++) {
+	for (; i < state->max_lanes_inuse; i++) {
 		state->lens[i] = 0x7f;
 		state->ldata[i].job_in_lane = NULL;
 	}
@@ -248,7 +248,7 @@ static void xxh32_mb_mgr_insert_job(XXH32_MB_JOB_MGR *state, XXH32_JOB *job)
 	int i;
 
 printf("#%s, %d, max inuse:%d\n", __func__, __LINE__, state->max_lanes_inuse);
-	for (i = 0; i < XXH32_MAX_LANES; i++) {
+	for (i = 0; i < state->max_lanes_inuse; i++) {
 		if (LANE_IS_FREE(state, i)) {
 			grp = i / LANE_LENGTH_SHIFT;
 			break;
@@ -258,8 +258,9 @@ printf("#%s, %d, max inuse:%d\n", __func__, __LINE__, state->max_lanes_inuse);
 	// add job into lanes
 	lane_idx = state->unused_lanes[grp] & LANE_INDEX_MASK;
 
+printf("#%s, %d, grp:%d, unused:0x%x, INDEX_MASK:0x%x, lane_idx:%d, MAX_LANES:%d\n", __func__, __LINE__, grp, state->unused_lanes[grp], LANE_INDEX_MASK, lane_idx, state->max_lanes_inuse);
 	// fatal error
-	assert(lane_idx < XXH32_MAX_LANES);
+	assert(lane_idx < state->max_lanes_inuse);
 printf("#%s, %d, job->len:0x%lx\n", __func__, __LINE__, job->len);
 	state->lens[lane_idx] = LANE_LENGTH(lane_idx, job->len);
 	state->ldata[lane_idx].job_in_lane = job;
@@ -273,7 +274,7 @@ static XXH32_JOB *xxh32_mb_mgr_free_lane(XXH32_MB_JOB_MGR * state)
         int i;
         XXH32_JOB *ret = NULL;
 
-        for (i = 0; i < XXH32_MAX_LANES; i++) {
+        for (i = 0; i < state->max_lanes_inuse; i++) {
 		if (state->lens[i] && state->ldata[i].job_in_lane)
 			printf("lens:0x%x, job_in_lane:%p\n", state->lens[i], state->ldata[i].job_in_lane);
                 if (LANE_IS_FINISHED(state, i)) {
@@ -304,7 +305,7 @@ printf("#%s, %d enter\n", __func__, __LINE__);
 	if (ret)
 		goto out;
 	// submit will wait data ready in all lanes
-	if (state->num_lanes_inuse < XXH32_MAX_LANES) {
+	if (state->num_lanes_inuse < state->max_lanes_inuse) {
 		ret = NULL;
 		goto out;
 	}
@@ -323,7 +324,7 @@ XXH32_JOB *xxh32_mb_mgr_flush_sve(XXH32_MB_JOB_MGR * state)
 printf("#%s, %d\n", __func__, __LINE__);
 	ret = xxh32_mb_mgr_free_lane(state);
 	if (ret) {
-printf("#%s, %d, ret:%d\n", __func__, __LINE__, ret);
+printf("#%s, %d, ret:%p\n", __func__, __LINE__, ret);
 		return ret;
 	}
 
