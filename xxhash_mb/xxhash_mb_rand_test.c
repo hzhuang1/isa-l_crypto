@@ -145,7 +145,7 @@ static void fill_rand_buffer(struct buf_list *list)
 			}
 			printf("\n");
 #else
-			init_buf(u, 0x37 + p->addr, p->size);
+			init_buf(u, 0x37 + (uint8_t)p->addr, p->size);
 			//init_buf(u, 0x37, p->size);
 			dump_buf(u, p->size);
 #endif
@@ -227,6 +227,7 @@ printf("#%s, %d\n", __func__, __LINE__);
 		xxh32_ctx_mgr_flush(mgr);
 printf("#%s, %d\n", __func__, __LINE__);
 	}
+	free(mgr);
 	verify_digest(list, ctx.job.result_digest);
 	free_buffer(list);
 	return 0;
@@ -235,18 +236,21 @@ out:
 	return ret;
 }
 
-#define JOB_CNT		2
-int run_multi_ctx(void)
+int run_multi_ctx(int job_cnt)
 {
-	struct buf_list *listpool[JOB_CNT];
+	struct buf_list *listpool[16];
 	XXH32_HASH_CTX_MGR *mgr;
-	XXH32_HASH_CTX ctxpool[JOB_CNT];
+	XXH32_HASH_CTX ctxpool[16];
 	struct ctx_user_data udata;
 	int ret, i, flags;
 	int buf_cnt = 1;
 
 	printf("%s:\n", __func__);
-	for (i = 0; i < JOB_CNT; i++) {
+	if (job_cnt < 1)
+		job_cnt = 1;
+	if (job_cnt > 16)
+		job_cnt = 16;
+	for (i = 0; i < job_cnt; i++) {
 		listpool[i] = alloc_buffer(buf_cnt);
 		if (!listpool[i]) {
 			fprintf(stderr, "Fail to allocate a buffer list!\n");
@@ -263,7 +267,7 @@ int run_multi_ctx(void)
 		goto out_mgr;
 	}
 	xxh32_ctx_mgr_init(mgr);
-	for (i = 0; i < JOB_CNT; i++) {
+	for (i = 0; i < job_cnt; i++) {
 		hash_ctx_init(&ctxpool[i]);
 		flags = HASH_ENTIRE;
 		xxh32_ctx_mgr_submit(mgr, &ctxpool[i], listpool[i][0].addr,
@@ -271,18 +275,20 @@ int run_multi_ctx(void)
 	}
 	//xxh32_ctx_mgr_flush(mgr);
 	while (xxh32_ctx_mgr_flush(mgr));
-	for (i = 0; i < JOB_CNT; i++) {
+	for (i = 0; i < job_cnt; i++) {
 		printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
 		ret = verify_digest(listpool[i], ctxpool[i].job.result_digest);
 		if (ret < 0)
 			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
 	}
-	for (i = 0; i < JOB_CNT; i++)
+	free(mgr);
+	for (i = 0; i < job_cnt; i++)
 		free_buffer(listpool[i]);
 	return 0;
 out_verify:
+	free(mgr);
 out_mgr:
-	i = JOB_CNT;
+	i = job_cnt;
 out:
 	for (; i > 0; i--)
 		free_buffer(listpool[i - 1]);
@@ -292,6 +298,6 @@ out:
 int main(void)
 {
 	run_single_ctx();
-	run_multi_ctx();
+	run_multi_ctx(15);
 	return 0;
 }
