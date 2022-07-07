@@ -38,11 +38,15 @@
 #endif
 #include <xxhash.h>
 
-#include "xxhash_mb.h"
 #include "endian_helper.h"
+#include "test.h"
+#include "xxhash_mb.h"
 
 #define MAX_BUF_SIZE	(16 << 20)	// 16MB
 #define MIN_BUF_SIZE	1
+
+#define TEST_PERF_LOOPS		100000
+#define TEST_PERF_LEN		256
 
 struct buf_list {
 	void		*addr;
@@ -50,11 +54,13 @@ struct buf_list {
 	struct buf_list	*next;
 };
 
+extern int xxh32_mb_sve_max_lanes(void);
+
 /*
  * Create a buffer list. Each list item contains with random buffer size.
  * The next field of last item is always NULL.
  */
-static struct buf_list *alloc_buffer(int nums)
+static struct buf_list *alloc_buffer(int nums, size_t size)
 {
 	struct buf_list *list;
 	struct timeval tv;
@@ -69,14 +75,15 @@ static struct buf_list *alloc_buffer(int nums)
 	srand((unsigned int)tv.tv_usec);
 	for (i = 0; i < nums; i++) {
 		list[i].next = NULL;
-		list[i].size = (size_t)(rand() / 100000);
-		list[i].size = 256;
+		if (size)
+			list[i].size = size;
+		else
+			list[i].size = (size_t)(rand() / 100000);
 		if (list[i].size > MAX_BUF_SIZE)
 			list[i].size = MAX_BUF_SIZE;
 		else if (list[i].size < MIN_BUF_SIZE)
 			list[i].size = MIN_BUF_SIZE;
 		list[i].addr = malloc(list[i].size);
-printf("list[%d] addr:%p\n", i, list[i].addr);
 		if (!list[i].addr)
 			goto out;
 		if (i > 0)
@@ -147,7 +154,7 @@ static void fill_rand_buffer(struct buf_list *list)
 #else
 			init_buf(u, 0x37 + (uint8_t)p->addr, p->size);
 			//init_buf(u, 0x37, p->size);
-			dump_buf(u, p->size);
+			//dump_buf(u, p->size);
 #endif
 		}
 		p = p->next;
@@ -195,7 +202,7 @@ int run_single_ctx(void)
 	int ret, i, flags;
 	int buf_cnt = 1;
 
-	list = alloc_buffer(buf_cnt);
+	list = alloc_buffer(buf_cnt, 0);
 	if (!list) {
 		fprintf(stderr, "Fail to allocate a buffer list!\n");
 		return -ENOMEM;
@@ -220,12 +227,9 @@ int run_single_ctx(void)
 			flags = HASH_LAST;
 		else
 			flags = HASH_UPDATE;
-printf("#%s, %d, size:0x%lx\n", __func__, __LINE__, list[i].size);
 		xxh32_ctx_mgr_submit(mgr, &ctx, list[i].addr, list[i].size,
 				     flags);
-printf("#%s, %d\n", __func__, __LINE__);
 		xxh32_ctx_mgr_flush(mgr);
-printf("#%s, %d\n", __func__, __LINE__);
 	}
 	free(mgr);
 	verify_digest(list, ctx.job.result_digest);
@@ -251,7 +255,7 @@ int run_multi_ctx(int job_cnt)
 	if (job_cnt > 16)
 		job_cnt = 16;
 	for (i = 0; i < job_cnt; i++) {
-		listpool[i] = alloc_buffer(buf_cnt);
+		listpool[i] = alloc_buffer(buf_cnt, 0);
 		if (!listpool[i]) {
 			fprintf(stderr, "Fail to allocate a buffer list!\n");
 			ret = -ENOMEM;
@@ -295,9 +299,136 @@ out:
 	return ret;
 }
 
+int run_sb_perf(int job_cnt)
+{
+	struct buf_list *list = NULL, *p = NULL;
+	int ret, i, t, flags, max_lanes;
+	int buf_cnt = 1;
+	struct perf start, stop;
+	XXH32_state_t state;
+	XXH32_hash_t h32;
+	int updated = 0;
+
+	if (job_cnt < 1)
+		job_cnt = 1;
+	max_lanes = xxh32_mb_sve_max_lanes() / 2;
+	if (job_cnt > max_lanes)
+		job_cnt = max_lanes;
+	printf("%s: job_cnt:%d, max_lanes:%d\n", __func__, job_cnt, max_lanes);
+
+	list = alloc_buffer(buf_cnt, TEST_PERF_LEN);
+	if (!list) {
+		fprintf(stderr, "Fail to allocate a buffer list!\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+	fill_rand_buffer(list);
+
+	perf_start(&start);
+	for (t = 0; t < TEST_PERF_LOOPS; t++) {
+		for (i = 0; i < job_cnt; i++) {
+			p = list;
+			updated = 0;
+			XXH32_reset(&state, 0);
+			while (p) {
+				if (p->addr) {
+					updated |= 1;
+					XXH32_update(&state, p->addr, p->size);
+				}
+				p = p->next;
+			}
+			if (!updated) {
+				fprintf(stderr, "Fail to get digest value!\n");
+				goto out;
+			}
+			h32 = XXH32_digest(&state);
+		}
+	}
+	perf_stop(&stop);
+	perf_print(stop, start, (long long)TEST_PERF_LEN * i * t);
+
+	free_buffer(list);
+	return 0;
+out:
+	if (list)
+		free_buffer(list);
+	return ret;
+}
+
+int run_mb_perf(int job_cnt)
+{
+	struct buf_list *listpool[16];
+	XXH32_HASH_CTX_MGR *mgr;
+	XXH32_HASH_CTX ctxpool[16];
+	struct ctx_user_data udata;
+	int ret, i, t, flags, max_lanes;
+	int buf_cnt = 1;
+	struct perf start, stop;
+
+	if (job_cnt < 1)
+		job_cnt = 1;
+	max_lanes = xxh32_mb_sve_max_lanes() / 2;
+	if (job_cnt > max_lanes)
+		job_cnt = max_lanes;
+	printf("%s: job_cnt:%d, max_lanes:%d\n", __func__, job_cnt, max_lanes);
+	for (i = 0; i < job_cnt; i++) {
+		listpool[i] = alloc_buffer(buf_cnt, TEST_PERF_LEN);
+		if (!listpool[i]) {
+			fprintf(stderr, "Fail to allocate a buffer list!\n");
+			ret = -ENOMEM;
+			goto out;
+		}
+		fill_rand_buffer(listpool[i]);
+	}
+
+	mgr = aligned_alloc(16, sizeof(XXH32_HASH_CTX_MGR));
+	if (!mgr) {
+		fprintf(stderr, "Fail to allocate mgr!\n");
+		ret = -ENOMEM;
+		goto out_mgr;
+	}
+	xxh32_ctx_mgr_init(mgr);
+	perf_start(&start);
+	for (t = 0; t < TEST_PERF_LOOPS; t++) {
+		for (i = 0; i < job_cnt; i++) {
+			hash_ctx_init(&ctxpool[i]);
+			flags = HASH_ENTIRE;
+			xxh32_ctx_mgr_submit(mgr,
+					&ctxpool[i],
+					listpool[i][0].addr,
+					listpool[i][0].size,
+					flags);
+		}
+		while (xxh32_ctx_mgr_flush(mgr));
+	}
+	perf_stop(&stop);
+	perf_print(stop, start, (long long)TEST_PERF_LEN * i * t);
+
+	for (i = 0; i < job_cnt; i++) {
+		printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
+		ret = verify_digest(listpool[i], ctxpool[i].job.result_digest);
+		if (ret < 0)
+			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
+	}
+	free(mgr);
+	for (i = 0; i < job_cnt; i++)
+		free_buffer(listpool[i]);
+	return 0;
+out_verify:
+	free(mgr);
+out_mgr:
+	i = job_cnt;
+out:
+	for (; i > 0; i--)
+		free_buffer(listpool[i - 1]);
+	return ret;
+}
+
 int main(void)
 {
-	run_single_ctx();
-	run_multi_ctx(15);
+	//run_single_ctx();
+	//run_multi_ctx(2);
+	run_sb_perf(16);
+	run_mb_perf(16);
 	return 0;
 }

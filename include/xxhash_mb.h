@@ -68,7 +68,7 @@ typedef uint64_t xxh64_digest_array[XXH64_DIGEST_NWORDS][XXH64_MAX_LANES];
 
 typedef struct {
 	uint8_t*  buffer;       //!< pointer to data buffer for this job
-	uint32_t  len;          //!< length of buffer for this job in blocks.
+	uint32_t  blk_len;          //!< length of buffer for this job in blocks.
 	DECLARE_ALIGNED(uint32_t digest[XXH32_DIGEST_NWORDS * 4],16);
 	uint32_t  result_digest;//!< final digest
 	JOB_STS   status;       //!< output job status
