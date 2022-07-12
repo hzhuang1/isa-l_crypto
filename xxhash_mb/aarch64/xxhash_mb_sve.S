@@ -139,6 +139,7 @@
 	ldr	\tmp, [\tmp]
 	// tmp: block address in job[i].buffer (offset: 256-byte)
 	add	\tmp, \tmp, \block_idx, lsl #8
+	prfm	pldl2keep, [\tmp, #256]
 	mov	x13, #256
 121:
 	ldr	x12, [\tmp], 8
@@ -269,10 +270,10 @@ xxh32_mb_sve:
 	adr	x8, XXH32_PRIME
 	// Z0: XXH32_PRIME32_1
 	ldr	x6, [x8], 4
-	mov	z0.s, p0/m, w6
 	// Z1: XXH32_PRIME32_2
-	ldr	x6, [x8]
-	mov	z1.s, p0/m, w6
+	ldr	x7, [x8]
+	mov	z0.s, p0/m, w6
+	mov	z1.s, p0/m, w7
 	// Z2: seed index
 	// Z12: data index
 	xxh32_init_seed_index z2, w6
