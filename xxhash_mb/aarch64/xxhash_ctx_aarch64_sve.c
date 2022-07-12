@@ -64,8 +64,6 @@ static inline void xxh32_hash_init_digest(XXH32_HASH_CTX *ctx)
 	ctx->job.digest[1] = ctx->seed + PRIME32_2;
 	ctx->job.digest[2] = ctx->seed;
 	ctx->job.digest[3] = ctx->seed - PRIME32_1;
-	//printf("#%s, %d, init digest, seed:%d, v0:0x%x, v1:0x%x, v2:0x%x, v3:0x%x\n", __func__, __LINE__, ctx->seed, ctx->job.digest[0], ctx->job.digest[1], ctx->job.digest[2], ctx->job.digest[3]);
-	//printf("#%s, %d, digest address:0x%p\n", __func__, __LINE__, &ctx->job.digest[0]);
 }
 
 static inline uint32_t hash_pad(uint8_t padblock[XXH32_BLOCK_SIZE * 2], uint64_t total_len)
@@ -86,7 +84,6 @@ static void xxh32_ctx_get_hash(XXH32_HASH_CTX *ctx,
 	const uint8_t *b_end = p + len;
 	uint32_t h32;
 
-//printf("#%s, %d, len:%d, result digest:0x%x, partial_block_buffer_length:%d\n", __func__, __LINE__, len, ctx->job.result_digest, ctx->partial_block_buffer_length);
 	if (len >= 16) {
 		const uint8_t *const limit = b_end - 16;
 
@@ -117,11 +114,9 @@ static void xxh32_ctx_get_hash(XXH32_HASH_CTX *ctx,
 		h32 = ctx->job.result_digest;
 
 	h32 += ctx->total_length;
-//printf("#%s, %d, h32:0x%x\n", __func__, __LINE__, h32);
 
 	while (p + 4 <= b_end) {
 		h32 += *(uint32_t *)p * PRIME32_3;
-//printf("uint32_t p:0x%x, h32:0x%x\n", *(uint32_t *)p, h32);
 		h32 = XXH_rotl32(h32, 17) * PRIME32_4;
 		p += 4;
 	}
@@ -137,7 +132,6 @@ static void xxh32_ctx_get_hash(XXH32_HASH_CTX *ctx,
 	h32 ^= h32 >> 13;
 	h32 *= PRIME32_3;
 	h32 ^= h32 >> 16;
-//printf("#%s, %d, h32:0x%x\n", __func__, __LINE__, h32);
 	ctx->job.result_digest = h32;
 }
 
@@ -147,22 +141,18 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_sve(XXH32_HASH_CTX_MGR *mgr,
 					 uint32_t len,
 					 HASH_CTX_FLAG flags)
 {
-	XXH32_HASH_CTX *result_ctx;
-
 	if (flags & (~HASH_ENTIRE)) {
 		ctx->error = HASH_CTX_ERROR_INVALID_FLAGS;
 		return ctx;
 	}
 
 	if (ctx->status & HASH_CTX_STS_PROCESSING) {
-		//printf("#%s, %d\n", __func__, __LINE__);
 		// Cannot submit to a currently processing job.
 		ctx->error = HASH_CTX_ERROR_ALREADY_PROCESSING;
 		return ctx;
 	}
 
 	if ((ctx->status & HASH_CTX_STS_COMPLETE) && !(flags & HASH_FIRST)) {
-		//printf("#%s, %d\n", __func__, __LINE__);
 		// Cannot update a finished job.
 		ctx->error = HASH_CTX_ERROR_ALREADY_COMPLETED;
 		return ctx;
@@ -190,7 +180,6 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_sve(XXH32_HASH_CTX_MGR *mgr,
 	ctx->status = (flags & HASH_LAST) ?
 		(HASH_CTX_STS) (HASH_CTX_STS_PROCESSING | HASH_CTX_STS_LAST) :
 		HASH_CTX_STS_PROCESSING;
-//printf("#%s, %d, %s, status:0x%x\n", __func__, __LINE__, (flags & HASH_LAST) ? "last block" : "one of block", ctx->status);
 
 	// Advance byte counter
 	ctx->total_length += len;
@@ -216,7 +205,8 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_sve(XXH32_HASH_CTX_MGR *mgr,
 					copy_len);
 
 			ctx->partial_block_buffer_length += copy_len;
-			ctx->incoming_buffer = buffer + copy_len;
+			ctx->incoming_buffer = (const void *)((uint64_t)buffer +
+						copy_len);
 			ctx->incoming_buffer_length = len - copy_len;
 		}
 		// The extra block should never contain more than 1 block here
@@ -233,7 +223,6 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_sve(XXH32_HASH_CTX_MGR *mgr,
 					&ctx->job);
 		}
 	}
-	//printf("#%s, %d, len:0x%lx, incoming length:0x%lx, status:0x%x, prepare to enter ctx_mgr_resubmit\n", __func__, __LINE__, len, ctx->incoming_buffer_length, ctx->status);
 
 	return xxh32_ctx_mgr_resubmit(mgr, ctx);
 }
@@ -249,7 +238,6 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_flush_sve(XXH32_HASH_CTX_MGR * mgr)
                 if (!ctx)
                         return NULL;
 
-		//printf("#%s, %d, prepare to enter ctx_mgr_resubmit\n", __func__, __LINE__);
                 // If flush returned a job, verify that it is safe to return to the user.
                 // If it is not ready, resubmit the job to finish processing.
                 ctx = xxh32_ctx_mgr_resubmit(mgr, ctx);
@@ -298,7 +286,6 @@ static XXH32_HASH_CTX *xxh32_ctx_mgr_resubmit(XXH32_HASH_CTX_MGR *mgr,
 			if (len) {
 				ctx->job.buffer = (uint8_t *) buffer;
 				ctx->job.blk_len = len >> XXH32_LOG2_BLOCK_SIZE;
-			//printf("#%s, %d, submit job buffer:0x%p, len:0x%x\n", __func__, __LINE__, ctx->job.buffer, ctx->job.blk_len);
 				ctx = (XXH32_HASH_CTX *)xxh32_mb_mgr_submit_sve(
 						&mgr->mgr,
 						&ctx->job);
@@ -314,27 +301,21 @@ static XXH32_HASH_CTX *xxh32_ctx_mgr_resubmit(XXH32_HASH_CTX_MGR *mgr,
 
 			ctx->status = HASH_CTX_STS_PROCESSING |
 				      HASH_CTX_STS_COMPLETE;
-			//printf("#%s, %d, status:0x%x\n", __func__, __LINE__, ctx->status);
 
 			ctx->job.buffer = buf;
-			//ctx->job.len = n_extra_blocks;
-			//printf("#%s, %d, len:0x%lx, total_length:%d\n", __func__, __LINE__, ctx->job.blk_len, ctx->total_length);
 			if (ctx->total_length < 16) {
 				// Don't use ctx->job.digest[].
 				ctx->job.result_digest = ctx->seed + PRIME32_5;
 				xxh32_ctx_get_hash(ctx, buf,
 					ctx->partial_block_buffer_length);
 			} else {
-				//printf("#%s, %d\n", __func__, __LINE__);
 				if (ctx->total_length < XXH32_BLOCK_SIZE)
 					xxh32_ctx_get_hash(ctx, buf,
 						ctx->partial_block_buffer_length);
 				else {
-					//printf("#%s, %d\n", __func__, __LINE__);
 					ctx = (XXH32_HASH_CTX *)xxh32_mb_mgr_submit_sve(
 								&mgr->mgr,
 								&ctx->job);
-			//printf("#%s, %d, status:0x%x\n", __func__, __LINE__, ctx->status);
 					xxh32_ctx_get_hash(ctx, buf, ctx->partial_block_buffer_length);
 				}
 			}
