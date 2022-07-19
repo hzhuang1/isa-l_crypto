@@ -139,7 +139,6 @@
 	ldr	\tmp, [\tmp]
 	// tmp: block address in job[i].buffer (offset: 256-byte)
 	add	\tmp, \tmp, \block_idx, lsl #8
-	prfm	pldl2keep, [\tmp, #256]
 	mov	x13, #256
 121:
 	ldr	x12, [\tmp], 8
@@ -148,6 +147,7 @@
 	bne	121b
 	subs	\cnt, \cnt, 1
 	bne	120b
+	prfm	pldl1strm, [\tmp, #512]
 .endm
 
 .macro xxh32_save_seed_to_jobs  job_vec:req, job_cnt, buffer:req, src:req, dst:req, tmp:req, cnt:req
