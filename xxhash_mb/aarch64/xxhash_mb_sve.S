@@ -147,11 +147,18 @@
 	subs	x13, x13, 8
 	bne	121b
 */
+/*
 122:
 	ldp	x12, x14, [\tmp], 16
 	stp	x12, x14, [\dst], 16
 	subs	x13, x13, 16
 	bne	122b
+*/
+123:
+	ld1	{v7.16b}, [\tmp], 16
+	st1	{v7.16b}, [\dst], 16
+	subs	x13, x13, 16
+	bne	123b
 	subs	\cnt, \cnt, 1
 	bne	120b
 	prfm	pldl1strm, [\tmp, #512]
