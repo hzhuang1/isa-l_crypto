@@ -140,11 +140,18 @@
 	// tmp: block address in job[i].buffer (offset: 256-byte)
 	add	\tmp, \tmp, \block_idx, lsl #8
 	mov	x13, #256
+/*
 121:
 	ldr	x12, [\tmp], 8
 	str	x12, [\dst], 8
 	subs	x13, x13, 8
 	bne	121b
+*/
+122:
+	ldp	x12, x14, [\tmp], 16
+	stp	x12, x14, [\dst], 16
+	subs	x13, x13, 16
+	bne	122b
 	subs	\cnt, \cnt, 1
 	bne	120b
 	prfm	pldl1strm, [\tmp, #512]
