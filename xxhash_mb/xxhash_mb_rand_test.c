@@ -45,7 +45,7 @@
 #define MAX_BUF_SIZE	(16 << 20)	// 16MB
 #define MIN_BUF_SIZE	1
 
-#define TEST_PERF_LOOPS		100000
+#define TEST_PERF_LOOPS		10000
 #define TEST_PERF_LEN		256
 
 struct buf_list {
@@ -182,7 +182,7 @@ static int verify_digest(struct buf_list *list, uint32_t digest)
 	}
 	h32 = XXH32_digest(&state);
 	if (h32 == digest) {
-		printf("Digest %x is matched!\n", digest);
+		//printf("Digest %x is matched!\n", digest);
 		return 0;
 	}
 	printf("Input digest vs verified digest: %x VS %x\n", digest, h32);
@@ -361,7 +361,7 @@ int run_mb_perf(int job_cnt, int len)
 	XXH32_HASH_CTX_MGR *mgr;
 	XXH32_HASH_CTX ctxpool[16];
 	struct ctx_user_data udata;
-	int ret, i, t, flags, max_lanes;
+	int ret = 0, i, t, flags, max_lanes;
 	int buf_cnt = 1;
 	struct perf start, stop;
 
@@ -407,8 +407,10 @@ int run_mb_perf(int job_cnt, int len)
 	for (i = 0; i < job_cnt; i++) {
 		printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
 		ret = verify_digest(listpool[i], ctxpool[i].job.result_digest);
-		if (ret < 0)
+		if (ret < 0) {
 			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
+			break;
+		}
 	}
 	free(mgr);
 	for (i = 0; i < job_cnt; i++)
@@ -431,8 +433,8 @@ int main(void)
 	//run_multi_ctx(2);
 	for (i = 0, len = TEST_PERF_LEN; i < 9; i++) {
 		printf("Test data buffer with %d-byte size:\n", len);
-		run_sb_perf(8, len);
-		run_mb_perf(8, len);
+		run_sb_perf(16, len);
+		run_mb_perf(16, len);
 		len <<= 1;
 	}
 	return 0;
