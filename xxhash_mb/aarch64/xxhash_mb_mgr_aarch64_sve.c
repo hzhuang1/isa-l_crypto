@@ -56,7 +56,7 @@
 #define min(a,b)            (((a) < (b)) ? (a) : (b))
 
 extern int xxh32_mb_sve_max_lanes(void);
-extern void xxh32_mb_sve(XXH32_JOB **job_vec, int job_cnt, int block_cnt, void *buf);
+extern void xxh32_mb_sve(XXH32_JOB **job_vec, int job_cnt, int block_cnt);
 
 void dump_state(XXH32_MB_JOB_MGR *state)
 {
@@ -170,11 +170,9 @@ static int xxh32_mb_mgr_do_jobs(XXH32_MB_JOB_MGR *state)
 {
 	int min_idx, job_cnt, len, i, min_len, blocks;
 	XXH32_JOB *job_vecs[XXH32_MAX_LANES];
-	uint8_t buf[256];
 
 	if (state->num_lanes_inuse == 0)
 		return -EINVAL;
-//printf("#%s, %d, max_inuse:%d, num_inuse:%d\n", __func__, __LINE__, state->max_lanes_inuse, state->num_lanes_inuse);
 	/* find the minimal length of all lanes */
 	// job_idx is the index of job_vecs[]
 	// i is the index of all lanes
@@ -182,7 +180,6 @@ static int xxh32_mb_mgr_do_jobs(XXH32_MB_JOB_MGR *state)
 	for (i = 0, job_cnt = 0; i < state->max_lanes_inuse &&
 	     job_cnt < state->num_lanes_inuse; i++) {
 		if (LANE_IS_NOT_FINISHED(state, i)) {
-//printf("#%s, %d, lane %d is not finished, lens:0x%x, lane->blk_len:0x%x, buffer:%p\n", __func__, __LINE__, i, state->lens[i], state->ldata[i].job_in_lane->blk_len, state->ldata[i].job_in_lane->buffer);
 			/*
 			 * state->lens[] is the combination of lane index
 			 * and length.
@@ -201,42 +198,21 @@ static int xxh32_mb_mgr_do_jobs(XXH32_MB_JOB_MGR *state)
 			job_vecs[job_cnt++] = state->ldata[i].job_in_lane;
 		}
 	}
-//printf("#%s, %d, min_len:0x%x\n", __func__, __LINE__, min_len);
 	if (min_len <= 0)
 		return -EINVAL;
-	//min_len = min_len & LANE_INDEX_MASK;
 	min_len &= ~LANE_INDEX_MASK;
 	// Only block data could be accelerated by SVE instructions.
 	// Remained data should be handled in other routine.
 	blocks = min_len >> LANE_LENGTH_SHIFT;
 
-	memset(buf, 0, 256);
-	xxh32_mb_sve(job_vecs, job_cnt, blocks, buf);
-	//printf("dump vecs:\n");
-	//dump_buf(&job_vecs[0]->digest[0], 256);
-	//dump_buf(job_vecs[0]->digest, 256);
-	//dump_buf(job_vecs[0]->digest, 4 * 4);
-	//printf("dump buf:\n");
-	//dump_buf(buf, 256);
-	//printf("sve end\n");
-	//dump_buf(job_vecs[0]->buffer, XXH32_BLOCK_SIZE);
+	xxh32_mb_sve(job_vecs, job_cnt, blocks);
 
 	for (i = 0; i < state->max_lanes_inuse; i++) {
 		if (LANE_IS_NOT_FINISHED(state, i)) {
-//printf("#%s, %d, lens:0x%x, lane->blk_len:0x%x, buffer:%p, min_len:0x%x, lens & MASK:0x%x\n", __func__, __LINE__, state->lens[i], state->ldata[i].job_in_lane->blk_len, state->ldata[i].job_in_lane->buffer, min_len, state->lens[i] & ~LANE_INDEX_MASK);
 			state->lens[i] -= min_len;
 			state->ldata[i].job_in_lane->blk_len -= blocks;
 			state->ldata[i].job_in_lane->buffer +=
 						blocks << XXH32_LOG2_BLOCK_SIZE;
-/*
-printf("#%s, %d, lens:0x%x, lane->blk_len:0x%x, buffer:%p, d[0]:0x%x, d[1]:0x%x, d[2]:0x%x, d[3]:0x%x\n",
-	__func__, __LINE__, state->lens[i], state->ldata[i].job_in_lane->blk_len, state->ldata[i].job_in_lane->buffer,
-	state->ldata[i].job_in_lane->digest[0],
-	state->ldata[i].job_in_lane->digest[1],
-	state->ldata[i].job_in_lane->digest[2],
-	state->ldata[i].job_in_lane->digest[3]
-);
-*/
 		}
 	}
 	return 0;
