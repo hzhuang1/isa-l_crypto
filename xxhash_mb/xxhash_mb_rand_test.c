@@ -392,6 +392,7 @@ int run_mb_perf(int job_cnt, int len)
 	for (t = 0; t < TEST_PERF_LOOPS; t++) {
 		for (i = 0; i < job_cnt; i++) {
 			hash_ctx_init(&ctxpool[i]);
+			ctxpool[i].seed = 0;
 			flags = HASH_ENTIRE;
 			xxh32_ctx_mgr_submit(mgr,
 					&ctxpool[i],
@@ -405,7 +406,7 @@ int run_mb_perf(int job_cnt, int len)
 	perf_print(stop, start, (long long)len * i * t);
 
 	for (i = 0; i < job_cnt; i++) {
-		printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
+		//printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
 		ret = verify_digest(listpool[i], ctxpool[i].job.result_digest);
 		if (ret < 0) {
 			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
