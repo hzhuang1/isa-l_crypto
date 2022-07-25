@@ -167,6 +167,17 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_sve(XXH32_HASH_CTX_MGR *mgr,
 
 		// Clear extra blocks
 		ctx->partial_block_buffer_length = 0;
+		ctx->region_start = buffer;
+		ctx->region_end = buffer + len - 4;
+		if (!mgr->mgr.region_start && !mgr->mgr.region_end) {
+			mgr->mgr.region_start = ctx->region_start;
+			mgr->mgr.region_end = ctx->region_end;
+		} else {
+			if (mgr->mgr.region_start < ctx->region_start)
+				mgr->mgr.region_start = ctx->region_start;
+			if (mgr->mgr.region_end < ctx->region_end)
+				mgr->mgr.region_end = ctx->region_end;
+		}
 	}
 	// If we made it here, there were no errors during this call to submit
 	ctx->error = HASH_CTX_ERROR_NONE;

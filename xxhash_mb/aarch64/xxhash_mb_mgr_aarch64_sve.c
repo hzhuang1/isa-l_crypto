@@ -55,8 +55,11 @@
 
 #define min(a,b)            (((a) < (b)) ? (a) : (b))
 
+#define XXH32_4GB_SHIFT		32
+
 extern int xxh32_mb_sve_max_lanes(void);
-extern void xxh32_mb_sve(XXH32_JOB **job_vec, int job_cnt, int block_cnt);
+extern void xxh32_mb_sve(XXH32_JOB **job_vec, int job_cnt, int block_cnt,
+			int overflow);
 
 void dump_state(XXH32_MB_JOB_MGR *state)
 {
@@ -147,6 +150,8 @@ void xxh32_mb_mgr_init_sve(XXH32_MB_JOB_MGR *state)
 		state->lens[i] = 0x7f;
 		state->ldata[i].job_in_lane = NULL;
 	}
+	state->region_start = 0;
+	state->region_end = 0;
 }
 
 void dump_buf(void *buf, size_t len)
@@ -170,9 +175,14 @@ static int xxh32_mb_mgr_do_jobs(XXH32_MB_JOB_MGR *state)
 {
 	int min_idx, job_cnt, len, i, min_len, blocks;
 	XXH32_JOB *job_vecs[XXH32_MAX_LANES];
+	uint64_t start, end;
+	int overflow;
+	uint64_t x9;
 
 	if (state->num_lanes_inuse == 0)
 		return -EINVAL;
+	start = state->region_start >> XXH32_4GB_SHIFT;
+	end = state->region_start >> XXH32_4GB_SHIFT;
 	/* find the minimal length of all lanes */
 	// job_idx is the index of job_vecs[]
 	// i is the index of all lanes
@@ -205,7 +215,13 @@ static int xxh32_mb_mgr_do_jobs(XXH32_MB_JOB_MGR *state)
 	// Remained data should be handled in other routine.
 	blocks = min_len >> LANE_LENGTH_SHIFT;
 
-	xxh32_mb_sve(job_vecs, job_cnt, blocks);
+	// If start equals to end, it means that all job buffers are in the
+	// same 4GB slot. So memory copy could be skipped in xxh32_mb_sve().
+	// If start doesn't equal to end, it means that more than one 4GB
+	// slot are used by all job buffers. So memory copy is used to format
+	// a traverse matrix in xxh32_mb_sve().
+	overflow = (start == end) ? 0 : 1;
+	xxh32_mb_sve(job_vecs, job_cnt, blocks, overflow);
 
 	for (i = 0; i < state->max_lanes_inuse; i++) {
 		if (LANE_IS_NOT_FINISHED(state, i)) {

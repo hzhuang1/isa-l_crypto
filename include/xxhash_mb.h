@@ -104,6 +104,8 @@ typedef struct {
 	 */
 	uint32_t max_lanes_inuse;
 	uint32_t num_lanes_inuse;
+	uint64_t region_start;
+	uint64_t region_end;
 } XXH32_MB_JOB_MGR;
 
 /** @brief Context layer - Holds state for multi-buffer XXH32 jobs */
@@ -128,6 +130,8 @@ typedef struct {
 	uint8_t        partial_block_buffer[XXH32_BLOCK_SIZE * 2]; //!< CTX partial blocks
 	uint32_t       partial_block_buffer_length;
 	//uint32_t       v[4];            //!< Accumulator lanes
+	uint64_t       region_start;    //!<
+	uint64_t       region_end;      //!<
 	uint32_t       large_len;       //!< Whether the hash is >=16
 	uint32_t       seed;            //!< Seed value
 	void*          user_data;       //!< pointer for user to keep any job-related data

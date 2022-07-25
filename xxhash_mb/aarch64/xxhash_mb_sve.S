@@ -45,10 +45,30 @@
 	index	\idx\().s, #0, \t
 .endm
 
-// The step of data is 256-byte.
+// The step of data is 256-byte. And the index is for the temporary buffer.
 .macro xxh32_init_data_index  idx:req, t:req
 	mov	\t, 256
 	index	\idx\().s, #0, \t
+.endm
+
+// Use address as index.
+// m_addr_w is the lower part of m_addr.
+.macro xxh32_init_sparse_index  idx:req, job_vec:req, job_cnt:req, buffer:req, src:req, dst:req, m_addr:req, m_addr_w:req, cnt:req
+	mov	\src, \job_vec
+	mov	\dst, \buffer
+	mov	\cnt, \job_cnt
+100:
+	// m_addr: ranges from jobs[0], jobs[1], ...
+	ldr	\m_addr, [\src], #8
+	// m_addr: jobs[i].buffer, ranges from 0, ...
+	ldr	\m_addr, [\m_addr]
+	// m_addr_w: the low 32-bit is used as index
+	str	\m_addr_w, [\dst], #4
+	subs	\cnt, \cnt, 1
+	bne	100b
+	ld1w	\idx\().s, p0/z, [\buffer]
+	// clear the low 32-bit
+	and	\m_addr, \m_addr, 0xffffffff00000000
 .endm
 
 // rotate left
@@ -216,6 +236,9 @@
 // Param buf, prm1, prm2, didx are read-only in the macro.
 // Param s1, s2, s3, s4, in1, in2, in3, in4 are updated in the macro.
 .macro xxh32_single  job_vec:req, job_cnt:req, blk_idx:req, buf:req, didx:req, prm1:req, prm2:req, s1:req, s2:req, s3:req, s4:req, in1:req, in2:req, in3:req, in4:req, src:req, dst:req, tmp:req, cnt:req
+	cbz	x3, 154f
+	// x3 == 1, means more than one 4GB slot is used. Memory copy should
+	// be used to format a traverse matrix.
 	xxh32_load_data_from_jobs  \job_vec, \job_cnt, \blk_idx, \buf, \src, \dst, \tmp, \cnt
 	mov	\cnt, #16
 	mov	\dst, \buf
@@ -226,6 +249,18 @@
 	xxh32_round_x4  \s1, \s2, \s3, \s4, \in1, \in2, \in3, \in4, \prm1, \prm2
 	subs	\cnt, \cnt, #1
 	bne	150b
+	b	158f
+154:
+	mov	\cnt, 16
+155:
+	// TODO: replace x9 by an input parameter
+	xxh32_sparse_load  x9, \didx, \in1, \in2, \in3, \in4, \tmp
+	mov	x9, \tmp
+	xxh32_round_x4  \s1, \s2, \s3, \s4, \in1, \in2, \in3, \in4, \prm1, \prm2
+	subs	\cnt, \cnt, #1
+	bne	155b
+158:
+	nop
 .endm
 
 // int xxh32_mb_sve_max_lanes()
@@ -291,8 +326,12 @@ xxh32_mb_sve:
 	// Z2: seed index
 	// Z12: data index
 	xxh32_init_seed_index z2, w6
+	cbz	x3, 5f
 	xxh32_init_data_index z12, w6
-
+	b	6f
+5:
+	xxh32_init_sparse_index z12, x0, x1, x5, x7, x8, x9, w9, x10
+6:
 	xxh32_load_seed_from_jobs  x0, x1, x4, x7, x8, x6, x10
 	// Load sparse seeds into vector registers.
 	xxh32_sparse_load  x4, z2, z3, z4, z5, z6, x6
