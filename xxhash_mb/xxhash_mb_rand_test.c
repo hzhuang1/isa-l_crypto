@@ -435,6 +435,10 @@ int main(void)
 	for (i = 0, len = TEST_PERF_LEN; i < 9; i++) {
 		printf("Test data buffer with %d-byte size:\n", len);
 		run_sb_perf(16, len);
+		run_mb_perf(1, len);
+		run_mb_perf(2, len);
+		run_mb_perf(4, len);
+		run_mb_perf(8, len);
 		run_mb_perf(16, len);
 		len <<= 1;
 	}
