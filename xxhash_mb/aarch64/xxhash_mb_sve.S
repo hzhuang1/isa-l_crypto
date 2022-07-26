@@ -30,13 +30,29 @@
 	.arch	armv8.2-a+sve
 
 .macro xxh32_sve_save_stack
-	stp	x29, x30, [sp, -48]!
+	stp	x29, x30, [sp, -144]!
+	stp	x27, x28, [sp, 16]
+	stp	x25, x26, [sp, 32]
+	stp	x23, x24, [sp, 48]
+	stp	x21, x22, [sp, 64]
+	stp	x19, x20, [sp, 80]
+	stp	x17, x18, [sp, 96]
+	stp	x15, x16, [sp, 112]
+	stp	x13, x14, [sp, 128]
 	mov	x29, sp
 .endm
 
 .macro xxh32_sve_restore_stack
 	mov	sp, x29
-	ldp	x29, x30, [sp], #48
+	ldp	x27, x28, [sp, 16]
+	ldp	x25, x26, [sp, 32]
+	ldp	x23, x24, [sp, 48]
+	ldp	x21, x22, [sp, 64]
+	ldp	x19, x20, [sp, 80]
+	ldp	x17, x18, [sp, 96]
+	ldp	x15, x16, [sp, 112]
+	ldp	x13, x14, [sp, 128]
+	ldp	x29, x30, [sp], #144
 .endm
 
 // The step of seed is 16-byte.
@@ -57,6 +73,7 @@
 	mov	\src, \job_vec
 	mov	\dst, \buffer
 	mov	\cnt, \job_cnt
+	mov	x12, 0
 100:
 	// m_addr: ranges from jobs[0], jobs[1], ...
 	ldr	\m_addr, [\src], #8
@@ -67,8 +84,82 @@
 	subs	\cnt, \cnt, 1
 	bne	100b
 	ld1w	\idx\().s, p0/z, [\buffer]
+	mov	\dst, \buffer
 	// clear the low 32-bit
 	and	\m_addr, \m_addr, 0xffffffff00000000
+	ldp	w13, w14, [\dst], 8
+	ldp	w15, w16, [\dst], 8
+	ldp	w17, w18, [\dst], 8
+	ldp	w19, w20, [\dst], 8
+	ldp	w21, w22, [\dst], 8
+	ldp	w23, w24, [\dst], 8
+	ldp	w25, w26, [\dst], 8
+	ldp	w27, w28, [\dst], 8
+	mov	\cnt, \job_cnt
+	add	x13, x13, \m_addr
+	prfm	pldl1strm, [x13, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x14, x14, \m_addr
+	prfm	pldl1strm, [x14, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x15, x15, \m_addr
+	prfm	pldl1strm, [x15, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x16, x16, \m_addr
+	prfm	pldl1strm, [x16, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x17, x17, \m_addr
+	prfm	pldl1strm, [x17, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x18, x18, \m_addr
+	prfm	pldl1strm, [x18, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x19, x19, \m_addr
+	prfm	pldl1strm, [x19, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x20, x20, \m_addr
+	prfm	pldl1strm, [x20, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x21, x21, \m_addr
+	prfm	pldl1strm, [x21, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x22, x22, \m_addr
+	prfm	pldl1strm, [x22, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x23, x23, \m_addr
+	prfm	pldl1strm, [x23, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x24, x24, \m_addr
+	prfm	pldl1strm, [x24, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x25, x25, \m_addr
+	prfm	pldl1strm, [x25, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x26, x26, \m_addr
+	prfm	pldl1strm, [x26, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x27, x27, \m_addr
+	prfm	pldl1strm, [x27, 512]
+	subs	\cnt, \cnt, 1
+	beq	105f
+	add	x28, x28, \m_addr
+	prfm	pldl1strm, [x28, 512]
+105:
+	nop
 .endm
 
 // rotate left
@@ -232,6 +323,74 @@
 	add	\tmp, \tmp, #4
 .endm
 
+.macro xxh32_sparse_prefetch  job_cnt:req, cnt:req
+	mov	\cnt, \job_cnt
+	prfm	pldl1strm, [x13, 512]
+	add	x13, x13, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x14, 512]
+	add	x14, x14, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x15, 512]
+	add	x15, x15, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x16, 512]
+	add	x16, x16, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x17, 512]
+	add	x17, x17, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x18, 512]
+	add	x18, x18, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x19, 512]
+	add	x19, x19, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x20, 512]
+	add	x20, x20, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x21, 512]
+	add	x21, x21, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x22, 512]
+	add	x22, x22, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x23, 512]
+	add	x23, x23, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x24, 512]
+	add	x24, x24, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x25, 512]
+	add	x25, x25, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x26, 512]
+	add	x26, x26, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x27, 512]
+	add	x27, x27, 256
+	subs	\cnt, \cnt, 1
+	beq	140f
+	prfm	pldl1strm, [x28, 512]
+	add	x28, x28, 256
+140:
+	nop
+.endm
+
 // Compute seed for one block data
 // Param buf, prm1, prm2, didx are read-only in the macro.
 // Param s1, s2, s3, s4, in1, in2, in3, in4 are updated in the macro.
@@ -259,6 +418,7 @@
 	xxh32_round_x4  \s1, \s2, \s3, \s4, \in1, \in2, \in3, \in4, \prm1, \prm2
 	subs	\cnt, \cnt, #1
 	bne	155b
+	xxh32_sparse_prefetch  \job_cnt, \cnt
 158:
 	nop
 .endm
