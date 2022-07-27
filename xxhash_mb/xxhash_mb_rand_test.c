@@ -45,7 +45,9 @@
 #define MAX_BUF_SIZE	(16 << 20)	// 16MB
 #define MIN_BUF_SIZE	1
 
-#define TEST_PERF_LOOPS		10000
+#define SEGMENT_MASK		0xFFFFFFFF00000000UL
+
+#define TEST_PERF_LOOPS		1000
 #define TEST_PERF_LEN		256
 
 struct buf_list {
@@ -380,6 +382,14 @@ int run_mb_perf(int job_cnt, int len)
 		}
 		fill_rand_buffer(listpool[i]);
 	}
+	for (i = 1; i < job_cnt; i++) {
+		if (((uint64_t)listpool[i - 1]->addr & SEGMENT_MASK) !=
+		    ((uint64_t)listpool[i]->addr & SEGMENT_MASK)) {
+			printf("All job buffers are NOT in the same 4GB "
+				"memory slot. It could impact performance.\n");
+			break;
+		}
+	}
 
 	mgr = aligned_alloc(16, sizeof(XXH32_HASH_CTX_MGR));
 	if (!mgr) {
@@ -429,11 +439,18 @@ out:
 
 int main(void)
 {
+	char str[64];
 	int i, len;
 	//run_single_ctx();
 	//run_multi_ctx(2);
-	for (i = 0, len = TEST_PERF_LEN; i < 9; i++) {
-		printf("Test data buffer with %d-byte size:\n", len);
+	for (i = 0, len = TEST_PERF_LEN; i < 15; i++) {
+		if (len >= 1024 * 1024)
+			sprintf(str, "%dMB", len >> 20);
+		else if (len >= 1024)
+			sprintf(str, "%dKB", len >> 10);
+		else
+			sprintf(str, "%dB", len);
+		printf("Test data buffer with %s size:\n", str);
 		run_sb_perf(16, len);
 		run_mb_perf(1, len);
 		run_mb_perf(2, len);
