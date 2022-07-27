@@ -173,7 +173,7 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_sve(XXH32_HASH_CTX_MGR *mgr,
 			mgr->mgr.region_start = ctx->region_start;
 			mgr->mgr.region_end = ctx->region_end;
 		} else {
-			if (mgr->mgr.region_start < ctx->region_start)
+			if (mgr->mgr.region_start > ctx->region_start)
 				mgr->mgr.region_start = ctx->region_start;
 			if (mgr->mgr.region_end < ctx->region_end)
 				mgr->mgr.region_end = ctx->region_end;

@@ -182,7 +182,7 @@ static int xxh32_mb_mgr_do_jobs(XXH32_MB_JOB_MGR *state)
 	if (state->num_lanes_inuse == 0)
 		return -EINVAL;
 	start = state->region_start >> XXH32_4GB_SHIFT;
-	end = state->region_start >> XXH32_4GB_SHIFT;
+	end = state->region_end >> XXH32_4GB_SHIFT;
 	/* find the minimal length of all lanes */
 	// job_idx is the index of job_vecs[]
 	// i is the index of all lanes
