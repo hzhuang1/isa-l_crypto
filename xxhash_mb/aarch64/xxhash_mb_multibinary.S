@@ -35,3 +35,6 @@ mbin_interface xxh32_ctx_mgr_submit
 mbin_interface xxh32_ctx_mgr_init
 mbin_interface xxh32_ctx_mgr_flush
 
+mbin_interface xxh64_ctx_mgr_submit
+mbin_interface xxh64_ctx_mgr_init
+mbin_interface xxh64_ctx_mgr_flush

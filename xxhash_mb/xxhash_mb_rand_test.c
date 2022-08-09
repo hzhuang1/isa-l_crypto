@@ -56,6 +56,11 @@ struct buf_list {
 	struct buf_list	*next;
 };
 
+typedef enum {
+	XXH32_TEST = 0,
+	XXH64_TEST,
+} XXH_TEST_TYPE;
+
 extern int xxh32_mb_sve_max_lanes(void);
 
 /*
@@ -163,7 +168,7 @@ static void fill_rand_buffer(struct buf_list *list)
 	}
 }
 
-static int verify_digest(struct buf_list *list, uint32_t digest)
+static int verify_digest32(struct buf_list *list, uint32_t digest)
 {
 	XXH32_state_t state;
 	XXH32_hash_t h32;
@@ -191,11 +196,39 @@ static int verify_digest(struct buf_list *list, uint32_t digest)
 	return -EINVAL;
 }
 
+static int verify_digest64(struct buf_list *list, uint64_t digest)
+{
+	XXH64_state_t state;
+	XXH64_hash_t h64;
+	struct buf_list *p = list;
+	int updated = 0;
+
+	XXH64_reset(&state, 0);
+	while (p) {
+		if (p->addr) {
+			updated |= 1;
+			XXH64_update(&state, p->addr, p->size);
+		}
+		p = p->next;
+	}
+	if (!updated) {
+		fprintf(stderr, "Fail to get digest value for verification!\n");
+		return -EINVAL;
+	}
+	h64 = XXH64_digest(&state);
+	if (h64 == digest) {
+		//printf("Digest %x is matched!\n", digest);
+		return 0;
+	}
+	printf("Input digest vs verified digest: %llx VS %llx\n", digest, h64);
+	return -EINVAL;
+}
+
 struct ctx_user_data {
 	uint32_t	seed;
 };
 
-int run_single_ctx(void)
+int run_single_ctx32(void)
 {
 	struct buf_list *list;
 	XXH32_HASH_CTX_MGR *mgr;
@@ -229,12 +262,59 @@ int run_single_ctx(void)
 			flags = HASH_LAST;
 		else
 			flags = HASH_UPDATE;
-		xxh32_ctx_mgr_submit(mgr, &ctx, list[i].addr, list[i].size,
-				     flags);
+		xxh32_ctx_mgr_submit(mgr, &ctx, list[i].addr,
+				list[i].size, flags);
 		xxh32_ctx_mgr_flush(mgr);
 	}
 	free(mgr);
-	verify_digest(list, ctx.job.result_digest);
+	verify_digest32(list, ctx.job.result_digest);
+	free_buffer(list);
+	return 0;
+out:
+	free_buffer(list);
+	return ret;
+}
+
+int run_single_ctx64(void)
+{
+	struct buf_list *list;
+	XXH64_HASH_CTX_MGR *mgr;
+	XXH64_HASH_CTX ctx;
+	struct ctx_user_data udata;
+	int ret, i, flags;
+	int buf_cnt = 1;
+
+	list = alloc_buffer(buf_cnt, 0);
+	if (!list) {
+		fprintf(stderr, "Fail to allocate a buffer list!\n");
+		return -ENOMEM;
+	}
+	fill_rand_buffer(list);
+
+	mgr = aligned_alloc(16, sizeof(XXH64_HASH_CTX_MGR));
+	if (!mgr) {
+		fprintf(stderr, "Fail to allocate mgr!\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+	xxh64_ctx_mgr_init(mgr);
+	hash_ctx_init(&ctx);
+	ctx.seed = 0;
+	for (i = 0; i < buf_cnt; i++) {
+		if (buf_cnt == 1)
+			flags = HASH_ENTIRE;
+		else if (i == 0)
+			flags = HASH_FIRST;
+		else if (i == (buf_cnt - 1))
+			flags = HASH_LAST;
+		else
+			flags = HASH_UPDATE;
+		xxh64_ctx_mgr_submit(mgr, &ctx, list[i].addr,
+				list[i].size, flags);
+		xxh64_ctx_mgr_flush(mgr);
+	}
+	free(mgr);
+	verify_digest64(list, ctx.job.result_digest);
 	free_buffer(list);
 	return 0;
 out:
@@ -283,7 +363,7 @@ int run_multi_ctx(int job_cnt)
 	while (xxh32_ctx_mgr_flush(mgr));
 	for (i = 0; i < job_cnt; i++) {
 		printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
-		ret = verify_digest(listpool[i], ctxpool[i].job.result_digest);
+		ret = verify_digest32(listpool[i], ctxpool[i].job.result_digest);
 		if (ret < 0)
 			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
 	}
@@ -417,7 +497,7 @@ int run_mb_perf(int job_cnt, int len)
 
 	for (i = 0; i < job_cnt; i++) {
 		//printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
-		ret = verify_digest(listpool[i], ctxpool[i].job.result_digest);
+		ret = verify_digest32(listpool[i], ctxpool[i].job.result_digest);
 		if (ret < 0) {
 			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
 			break;
@@ -443,6 +523,8 @@ int main(void)
 	int i, len;
 	//run_single_ctx();
 	//run_multi_ctx(2);
+	run_single_ctx64();
+#if 0
 	for (i = 0, len = TEST_PERF_LEN; i < 15; i++) {
 		if (len >= 1024 * 1024)
 			sprintf(str, "%dMB", len >> 20);
@@ -459,5 +541,6 @@ int main(void)
 		run_mb_perf(16, len);
 		len <<= 1;
 	}
+#endif
 	return 0;
 }

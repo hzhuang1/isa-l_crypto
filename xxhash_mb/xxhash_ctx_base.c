@@ -154,7 +154,7 @@ int xxh64_update(XXH64_HASH_CTX *ctx, const void *input, size_t length);
  *
  * Return: The xxh64 hash stored in the state.
  */
-uint64_t xxh64_digest(const XXH64_HASH_CTX *ctx);
+void xxh64_digest(XXH64_HASH_CTX *ctx);
 
 
 /*-**************************
@@ -176,13 +176,11 @@ static const uint32_t PRIME32_3 = 3266489917U;
 static const uint32_t PRIME32_4 =  668265263U;
 static const uint32_t PRIME32_5 =  374761393U;
 
-/*
 static const uint64_t PRIME64_1 = 11400714785074694791ULL;
 static const uint64_t PRIME64_2 = 14029467366897019727ULL;
 static const uint64_t PRIME64_3 =  1609587929392839161ULL;
 static const uint64_t PRIME64_4 =  9650029242287828579ULL;
 static const uint64_t PRIME64_5 =  2870177450012600261ULL;
-*/
 
 void xxh32_ctx_mgr_init_base(XXH32_HASH_CTX_MGR * mgr)
 {
@@ -192,7 +190,6 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_base(XXH32_HASH_CTX_MGR *mgr,
 					  XXH32_HASH_CTX *ctx,
 					  const void *buffer,
 					  uint32_t len,
-					  uint32_t seed,
 					  HASH_CTX_FLAG flags)
 {
 	if (flags & (~HASH_ENTIRE)) {
@@ -218,7 +215,7 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_base(XXH32_HASH_CTX_MGR *mgr,
 
 	switch (flags) {
 	case HASH_FIRST:
-		xxh32_reset(ctx, seed);
+		xxh32_reset(ctx, ctx->seed);
 		xxh32_update(ctx, buffer, len);
 		break;
 	case HASH_UPDATE:
@@ -229,7 +226,7 @@ XXH32_HASH_CTX *xxh32_ctx_mgr_submit_base(XXH32_HASH_CTX_MGR *mgr,
 		xxh32_digest(ctx);
 		break;
 	case HASH_ENTIRE:
-		xxh32_reset(ctx, seed);
+		xxh32_reset(ctx, ctx->seed);
 		xxh32_update(ctx, buffer, len);
 		xxh32_digest(ctx);
 		break;
@@ -278,8 +275,8 @@ int xxh32_update(XXH32_HASH_CTX *ctx, const void *input, size_t len)
 	const uint8_t *p = (const uint8_t *)input;
 	const uint8_t *const b_end = p + len;
 
-	ctx->total_length += (uint32_t)len;
-	ctx->large_len |= (uint32_t)((len >= 16) | (ctx->total_length >= 16));
+	ctx->total_length += len;
+	ctx->large_len |= (len >= 16) | (ctx->total_length >= 16);
 
 	if (ctx->partial_block_buffer_length + len < 16) {
 		/* fill in the partial block buffer */
@@ -382,61 +379,219 @@ void xxh32_digest(XXH32_HASH_CTX *ctx)
 	ctx->job.result_digest ^= ctx->job.result_digest >> 16;
 }
 
-#if 0
-uint32_t xxh32(const void *input, const size_t len, const uint32_t seed)
+void xxh64_ctx_mgr_init_base(XXH64_HASH_CTX_MGR *mgr)
 {
-	const uint8_t *p = (const uint8_t *)input;
-	const uint8_t *b_end = p + len;
-	uint32_t h32;
+}
 
-	if (len >= 16) {
-		const uint8_t *const limit = b_end - 16;
-		uint32_t v0 = seed + PRIME32_1 + PRIME32_2;
-		uint32_t v1 = seed + PRIME32_2;
-		uint32_t v2 = seed + 0;
-		uint32_t v3 = seed - PRIME32_1;
-
-		do {
-			v0 = xxh32_round(v0, to_le32(p));
-			p += 4;
-			v1 = xxh32_round(v1, to_le32(p));
-			p += 4;
-			v2 = xxh32_round(v2, to_le32(p));
-			p += 4;
-			v3 = xxh32_round(v3, to_le32(p));
-			p += 4;
-		} while (p <= limit);
-
-		h32 = xxh_rotl32(v0, 1) + xxh_rotl32(v1, 7) +
-		      xxh_rotl32(v2, 12) + xxh_rotl32(v3, 18);
-	} else {
-		h32 = seed + PRIME32_5;
+XXH64_HASH_CTX *xxh64_ctx_mgr_submit_base(XXH64_HASH_CTX_MGR *mgr,
+					XXH64_HASH_CTX *ctx,
+					const void *buffer,
+					uint64_t len,
+					HASH_CTX_FLAG flags)
+{
+	if (flags & (~HASH_ENTIRE)) {
+		ctx->error = HASH_CTX_ERROR_INVALID_FLAGS;
+		return ctx;
 	}
 
-	h32 += (uint32_t)len;
+	if ((ctx->status & HASH_CTX_STS_PROCESSING) &&
+	    (flags == HASH_ENTIRE)) {
+		ctx->error = HASH_CTX_ERROR_ALREADY_PROCESSING;
+		return ctx;
+	}
 
-	/* XXH_PROCESS4 */
-	while (p + 4 <= b_end) {
-		h32 += to_le32(p) * PRIME32_3;
-		h32 = xxh_rotl32(h32, 17) * PRIME32_4;
+	if ((ctx->status & HASH_CTX_STS_COMPLETE) && !(flags & HASH_FIRST)) {
+		// Cannot update a finished job.
+		ctx->error = HASH_CTX_ERROR_ALREADY_COMPLETED;
+		return ctx;
+	}
+
+	switch (flags) {
+	case HASH_FIRST:
+		xxh64_reset(ctx, ctx->seed);
+		xxh64_update(ctx, buffer, len);
+		break;
+	case HASH_UPDATE:
+		xxh64_update(ctx, buffer, len);
+		break;
+	case HASH_LAST:
+		xxh64_update(ctx, buffer, len);
+		xxh64_digest(ctx);
+		break;
+	case HASH_ENTIRE:
+		xxh64_reset(ctx, ctx->seed);
+		xxh64_update(ctx, buffer, len);
+		xxh64_digest(ctx);
+		break;
+	}
+	return ctx;
+}
+
+XXH64_HASH_CTX *xxh64_ctx_mgr_flush_base(XXH64_HASH_CTX_MGR *mgr)
+{
+	return NULL;
+}
+
+void xxh64_reset(XXH64_HASH_CTX *ctx, uint64_t seed)
+{
+	// Init digest
+	ctx->job.digest[0] = seed + PRIME64_1 + PRIME64_2;
+	ctx->job.digest[1] = seed + PRIME64_2;
+	ctx->job.digest[2] = seed + 0;
+	ctx->job.digest[3] = seed - PRIME64_1;
+
+	// Reset byte counter
+	ctx->total_length = 0;
+
+	// Clear extra blocks
+	ctx->partial_block_buffer_length = 0;
+
+	// If we made it here, there were no errors during this call to submit
+	ctx->error = HASH_CTX_ERROR_NONE;
+
+	// Mark it as processing
+	ctx->status = HASH_CTX_STS_PROCESSING;
+}
+
+static uint64_t xxh64_round(uint64_t acc, const uint64_t input)
+{
+	acc += input * PRIME64_2;
+	acc = XXH_rotl64(acc, 31);
+	acc *= PRIME64_1;
+	return acc;
+}
+
+static uint64_t xxh64_merge_round(uint64_t acc, uint64_t val)
+{
+	val = xxh64_round(0, val);
+	acc ^= val;
+	acc = acc * PRIME64_1 + PRIME64_4;
+	return acc;
+}
+
+int xxh64_update(XXH64_HASH_CTX *ctx, const void *input, size_t len)
+{
+	const uint8_t *p = (const uint8_t *)input;
+	const uint8_t *const b_end = p + len;
+
+	ctx->total_length += len;
+
+	if (ctx->partial_block_buffer_length + len < 32) {
+		// fill in the partial block buffer
+		memcpy(ctx->partial_block_buffer +
+			ctx->partial_block_buffer_length,
+			input,
+			len);
+		ctx->partial_block_buffer_length += (uint32_t)len;
+		return 0;
+	}
+
+	if (ctx->partial_block_buffer_length) {
+		// data left from previous update
+		memcpy(ctx->partial_block_buffer +
+			ctx->partial_block_buffer_length,
+			input,
+			32 - ctx->partial_block_buffer_length);
+		{
+			const uint64_t *p64 = (const uint64_t *)
+					ctx->partial_block_buffer;
+			ctx->job.digest[0] = xxh64_round(
+						ctx->job.digest[0], *p64);
+			p64++;
+			ctx->job.digest[1] = xxh64_round(
+						ctx->job.digest[1], *p64);
+			p64++;
+			ctx->job.digest[2] = xxh64_round(
+						ctx->job.digest[2], *p64);
+			p64++;
+			ctx->job.digest[3] = xxh64_round(
+						ctx->job.digest[3], *p64);
+		}
+		p += 32 - ctx->partial_block_buffer_length;
+		ctx->partial_block_buffer_length = 0;
+	}
+
+	if (p <= b_end - 32) {
+		const uint8_t *const limit = b_end - 16;
+		uint64_t v1 = ctx->job.digest[0];
+		uint64_t v2 = ctx->job.digest[1];
+		uint64_t v3 = ctx->job.digest[2];
+		uint64_t v4 = ctx->job.digest[3];
+
+		do {
+			v1 = xxh64_round(v1, *(uint64_t *)p);
+			p += 8;
+			v2 = xxh64_round(v2, *(uint64_t *)p);
+			p += 8;
+			v3 = xxh64_round(v3, *(uint64_t *)p);
+			p += 8;
+			v4 = xxh64_round(v4, *(uint64_t *)p);
+			p += 8;
+		} while (p <= limit);
+
+		ctx->job.digest[0] = v1;
+		ctx->job.digest[1] = v2;
+		ctx->job.digest[2] = v3;
+		ctx->job.digest[3] = v4;
+	}
+
+	if (p < b_end) {
+		memcpy(ctx->partial_block_buffer, p, (size_t)(b_end - p));
+		ctx->partial_block_buffer_length = (uint32_t)(b_end - p);
+	}
+
+	return 0;
+}
+
+void xxh64_digest(XXH64_HASH_CTX *ctx)
+{
+	const uint8_t *p = (const uint8_t *)ctx->partial_block_buffer;
+	const uint8_t *const b_end = (const uint8_t *)ctx->partial_block_buffer
+				+ ctx->partial_block_buffer_length;
+	uint64_t h64;
+
+	if (ctx->total_length >= 32) {
+		uint64_t v1 = ctx->job.digest[0];
+		uint64_t v2 = ctx->job.digest[1];
+		uint64_t v3 = ctx->job.digest[2];
+		uint64_t v4 = ctx->job.digest[3];
+
+		h64 = XXH_rotl64(v1, 1) + XXH_rotl64(v2, 7) +
+			XXH_rotl64(v3, 12) + XXH_rotl64(v4, 18);
+		h64 = xxh64_merge_round(h64, v1);
+		h64 = xxh64_merge_round(h64, v2);
+		h64 = xxh64_merge_round(h64, v3);
+		h64 = xxh64_merge_round(h64, v4);
+	} else
+		h64 = ctx->job.digest[2] + PRIME64_5;
+
+	h64 += ctx->total_length;
+
+	while (p + 8 <= b_end) {
+		const uint64_t k1 = xxh64_round(0, *(uint64_t *)p);
+
+		h64 ^= k1;
+		h64 = XXH_rotl64(h64, 27) * PRIME64_1 + PRIME64_4;
+		p += 8;
+	}
+
+	if (p + 4 <= b_end) {
+		h64 ^= (uint64_t)(*(uint32_t *)p) * PRIME64_1;
+		h64 = XXH_rotl64(h64, 23) * PRIME64_2 + PRIME64_3;
 		p += 4;
 	}
 
-	/* XXH_PROCESS1 */
 	while (p < b_end) {
-		h32 += (*p) * PRIME32_5;
-		h32 = xxh_rotl32(h32, 11) * PRIME32_1;
+		h64 ^= (*p) * PRIME64_5;
+		h64 = XXH_rotl64(h64, 11) * PRIME64_1;
 		p++;
 	}
 
-	/* XXH32_avalanche() */
-	h32 ^= h32 >> 15;
-	h32 *= PRIME32_2;
-	h32 ^= h32 >> 13;
-	h32 *= PRIME32_3;
-	h32 ^= h32 >> 16;
+	h64 ^= h64 >> 33;
+	h64 *= PRIME64_2;
+	h64 ^= h64 >> 29;
+	h64 *= PRIME64_3;
+	h64 ^= h64 >> 32;
 
-	return h32;
+	ctx->job.result_digest = h64;
 }
-#endif
-

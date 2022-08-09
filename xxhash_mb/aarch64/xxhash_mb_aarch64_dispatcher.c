@@ -62,3 +62,18 @@ DEFINE_INTERFACE_DISPATCHER(xxh32_ctx_mgr_flush)
 
 	return PROVIDER_BASIC(xxh32_ctx_mgr_flush);
 }
+
+DEFINE_INTERFACE_DISPATCHER(xxh64_ctx_mgr_init)
+{
+	return PROVIDER_BASIC(xxh64_ctx_mgr_init);
+}
+
+DEFINE_INTERFACE_DISPATCHER(xxh64_ctx_mgr_submit)
+{
+	return PROVIDER_BASIC(xxh64_ctx_mgr_submit);
+}
+
+DEFINE_INTERFACE_DISPATCHER(xxh64_ctx_mgr_flush)
+{
+	return PROVIDER_BASIC(xxh64_ctx_mgr_flush);
+}
