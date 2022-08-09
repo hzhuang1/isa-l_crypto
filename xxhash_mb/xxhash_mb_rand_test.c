@@ -138,20 +138,23 @@ void dump_buf(unsigned char *buf, size_t len)
         }
 }
 
+//#define FILL_RAND_BUFFER
+
 /* Fill random data into the whole buffer list. */
 static void fill_rand_buffer(struct buf_list *list)
 {
 	struct buf_list *p = list;
 	unsigned char *u;
+#ifdef FILL_RAND_BUFFER
 	int i;
+#endif
 
 	while (p) {
 		if (p->addr) {
 			u = (unsigned char *)p->addr;
-#if 0
+#ifdef FILL_RAND_BUFFER
 			for (i = 0; i < p->size; i++)
 				u[i] = (unsigned char)rand();
-				//u[i] = (unsigned char)0xa7;
 			for (i = 0; i < p->size; i++) {
 				printf("%02x ", u[i]);
 				if (i % 16 == 0)
@@ -159,9 +162,7 @@ static void fill_rand_buffer(struct buf_list *list)
 			}
 			printf("\n");
 #else
-			init_buf(u, 0x37 + (uint8_t)p->addr, p->size);
-			//init_buf(u, 0x37, p->size);
-			//dump_buf(u, p->size);
+			init_buf(u, 0x37 + (uint8_t)(uint64_t)p->addr, p->size);
 #endif
 		}
 		p = p->next;
@@ -220,7 +221,7 @@ static int verify_digest64(struct buf_list *list, uint64_t digest)
 		//printf("Digest %x is matched!\n", digest);
 		return 0;
 	}
-	printf("Input digest vs verified digest: %llx VS %llx\n", digest, h64);
+	printf("Input digest vs verified digest: %lx VS %lx\n", digest, h64);
 	return -EINVAL;
 }
 
@@ -233,7 +234,6 @@ int run_single_ctx32(void)
 	struct buf_list *list;
 	XXH32_HASH_CTX_MGR *mgr;
 	XXH32_HASH_CTX ctx;
-	struct ctx_user_data udata;
 	int ret, i, flags;
 	int buf_cnt = 1;
 
@@ -280,7 +280,6 @@ int run_single_ctx64(void)
 	struct buf_list *list;
 	XXH64_HASH_CTX_MGR *mgr;
 	XXH64_HASH_CTX ctx;
-	struct ctx_user_data udata;
 	int ret, i, flags;
 	int buf_cnt = 1;
 
@@ -327,7 +326,6 @@ int run_multi_ctx(int job_cnt)
 	struct buf_list *listpool[16];
 	XXH32_HASH_CTX_MGR *mgr;
 	XXH32_HASH_CTX ctxpool[16];
-	struct ctx_user_data udata;
 	int ret, i, flags;
 	int buf_cnt = 1;
 
@@ -371,8 +369,6 @@ int run_multi_ctx(int job_cnt)
 	for (i = 0; i < job_cnt; i++)
 		free_buffer(listpool[i]);
 	return 0;
-out_verify:
-	free(mgr);
 out_mgr:
 	i = job_cnt;
 out:
@@ -384,11 +380,10 @@ out:
 int run_sb_perf(int job_cnt, int len)
 {
 	struct buf_list *list = NULL, *p = NULL;
-	int ret, i, t, flags, max_lanes;
+	int ret, i, t, max_lanes;
 	int buf_cnt = 1;
 	struct perf start, stop;
 	XXH32_state_t state;
-	XXH32_hash_t h32;
 	int updated = 0;
 
 	if (job_cnt < 1)
@@ -423,7 +418,7 @@ int run_sb_perf(int job_cnt, int len)
 				fprintf(stderr, "Fail to get digest value!\n");
 				goto out;
 			}
-			h32 = XXH32_digest(&state);
+			XXH32_digest(&state);
 		}
 	}
 	perf_stop(&stop);
@@ -442,7 +437,6 @@ int run_mb_perf(int job_cnt, int len)
 	struct buf_list *listpool[16];
 	XXH32_HASH_CTX_MGR *mgr;
 	XXH32_HASH_CTX ctxpool[16];
-	struct ctx_user_data udata;
 	int ret = 0, i, t, flags, max_lanes;
 	int buf_cnt = 1;
 	struct perf start, stop;
@@ -507,8 +501,6 @@ int run_mb_perf(int job_cnt, int len)
 	for (i = 0; i < job_cnt; i++)
 		free_buffer(listpool[i]);
 	return 0;
-out_verify:
-	free(mgr);
 out_mgr:
 	i = job_cnt;
 out:
@@ -520,7 +512,8 @@ out:
 int main(void)
 {
 	char str[64];
-	int i, len;
+	int i;
+
 	//run_single_ctx();
 	//run_multi_ctx(2);
 	run_single_ctx64();
