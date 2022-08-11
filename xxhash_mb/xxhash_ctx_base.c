@@ -512,7 +512,7 @@ int xxh64_update(XXH64_HASH_CTX *ctx, const void *input, size_t len)
 	}
 
 	if (p <= b_end - 32) {
-		const uint8_t *const limit = b_end - 16;
+		const uint8_t *const limit = b_end - 32;
 		uint64_t v1 = ctx->job.digest[0];
 		uint64_t v2 = ctx->job.digest[1];
 		uint64_t v3 = ctx->job.digest[2];
@@ -551,10 +551,22 @@ void xxh64_digest(XXH64_HASH_CTX *ctx)
 	uint64_t h64;
 
 	if (ctx->total_length >= 32) {
+		const uint8_t *const limit = b_end - 32;
 		uint64_t v1 = ctx->job.digest[0];
 		uint64_t v2 = ctx->job.digest[1];
 		uint64_t v3 = ctx->job.digest[2];
 		uint64_t v4 = ctx->job.digest[3];
+
+		while (p <= limit) {
+			v1 = xxh64_round(v1, *(uint64_t *)p);
+			p += 8;
+			v2 = xxh64_round(v2, *(uint64_t *)p);
+			p += 8;
+			v3 = xxh64_round(v3, *(uint64_t *)p);
+			p += 8;
+			v4 = xxh64_round(v4, *(uint64_t *)p);
+			p += 8;
+		};
 
 		h64 = XXH_rotl64(v1, 1) + XXH_rotl64(v2, 7) +
 			XXH_rotl64(v3, 12) + XXH_rotl64(v4, 18);

@@ -138,7 +138,7 @@ void dump_buf(unsigned char *buf, size_t len)
         }
 }
 
-//#define FILL_RAND_BUFFER
+#define FILL_RAND_BUFFER
 
 /* Fill random data into the whole buffer list. */
 static void fill_rand_buffer(struct buf_list *list)
@@ -155,14 +155,18 @@ static void fill_rand_buffer(struct buf_list *list)
 #ifdef FILL_RAND_BUFFER
 			for (i = 0; i < p->size; i++)
 				u[i] = (unsigned char)rand();
+			/*
 			for (i = 0; i < p->size; i++) {
 				printf("%02x ", u[i]);
 				if (i % 16 == 0)
 					printf("\n");
 			}
 			printf("\n");
+			*/
 #else
 			init_buf(u, 0x37 + (uint8_t)(uint64_t)p->addr, p->size);
+			//init_buf(u, 0x37, p->size);
+			printf("size:0x%lx\n", p->size);
 #endif
 		}
 		p = p->next;
