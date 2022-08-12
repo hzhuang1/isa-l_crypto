@@ -325,3 +325,183 @@ XXH32_JOB *xxh32_mb_mgr_flush_sve(XXH32_MB_JOB_MGR * state)
 	xxh32_mb_mgr_do_jobs(state);
 	return xxh32_mb_mgr_free_lane(state);
 }
+
+void xxh64_mb_mgr_init_sve(XXH64_MB_JOB_MGR *state)
+{
+	unsigned int i;
+
+	state->max_lanes_inuse = xxh32_mb_sve_max_lanes();
+	switch (state->max_lanes_inuse) {
+	case 4:
+		// SVE128
+		state->unused_lanes[0] = 0x7f7f7f7f7f7f0100;
+		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 8:
+		// SVE256
+		state->unused_lanes[0] = 0x7f7f7f7f03020100;
+		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 16:
+		// SVE512
+		state->unused_lanes[0] = 0x0706050403020100;
+		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 32:
+		// SVE1024
+		// Each byte indicates a lane index that is from 0 to 15.
+		state->unused_lanes[0] = 0x0706050403020100;
+		state->unused_lanes[1] = 0x0f0e0d0c0b0a0908;
+		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
+		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
+		break;
+	case 64:
+		// SVE2048
+		// Each byte indicates a lane index that is from 0 to 31.
+		state->unused_lanes[0] = 0x0706050403020100;
+		state->unused_lanes[1] = 0x0f0e0d0c0b0a0908;
+		state->unused_lanes[2] = 0x1716151413121110;
+		state->unused_lanes[3] = 0x1f1e1d1c1b1a1918;
+		break;
+	default:
+		state->max_lanes_inuse = 0;
+		return;
+	}
+
+	state->num_lanes_inuse = 0;
+	for (i = 0; i < state->max_lanes_inuse; i++) {
+		state->lens[i] = i;
+		state->ldata[i].job_in_lane = NULL;
+	}
+	for (; i < state->max_lanes_inuse; i++) {
+		state->lens[i] = 0x7f;
+		state->ldata[i].job_in_lane = NULL;
+	}
+}
+
+static int xxh64_mb_mgr_do_jobs(XXH64_MB_JOB_MGR *state)
+{
+	int min_idx, job_cnt, len, i, min_len, blocks;
+	XXH64_JOB *job_vecs[XXH64_MAX_LANES];
+
+	if (state->num_lanes_inuse == 0)
+		return -EINVAL;
+	// find the minimal length of all lanes
+	// job_idx is the index of job_vecs[]
+	// i is the index of all lanes
+	// min_idx is the index of minimal lane length
+	for (i = 0, job_cnt = 0; i < state->max_lanes_inuse &&
+	     job_cnt < state->num_lanes_inuse; i++) {
+		if (LANE_IS_NOT_FINISHED(state, i)) {
+			/*
+			 * state->lens[] is the combination of lane index
+			 * and length.
+			 */
+			if (job_cnt)
+				min_len = min(min_len, state->lens[i]);
+			else
+				min_len = state->lens[i];
+			job_vecs[job_cnt++] = state->ldata[i].job_in_lane;
+		}
+	}
+	if (min_len <= 0)
+		return -EINVAL;
+	min_len &= ~LANE_INDEX_MASK;
+	// Only block data could be accelerated by SVE instructions.
+	// Remained data should be handled in other routine.
+	blocks = min_len >> LANE_LENGTH_SHIFT;
+	//xxh64_mb_sve(job_vecs, job_cnt, blocks);
+
+	for (i = 0; i < state->max_lanes_inuse; i++) {
+		if (LANE_IS_NOT_FINISHED(state, i)) {
+			state->lens[i] -= min_len;
+			state->ldata[i].job_in_lane->blk_len -= blocks;
+			state->ldata[i].job_in_lane->buffer +=
+						blocks << XXH64_LOG2_BLOCK_SIZE;
+		}
+	}
+	return 0;
+}
+
+static void xxh64_mb_mgr_insert_job(XXH64_MB_JOB_MGR *state, XXH64_JOB *job)
+{
+	int grp;
+	int lane_idx;
+	int i;
+
+	for (i = 0; i < state->max_lanes_inuse; i++) {
+		if (LANE_IS_FREE(state, i)) {
+			grp = i / LANE_LENGTH_SHIFT;
+			break;
+		}
+	}
+
+	lane_idx = state->unused_lanes[grp] & LANE_INDEX_MASK;
+	assert(lane_idx < state->max_lanes_inuse);
+
+	state->lens[lane_idx] = LANE_LENGTH(lane_idx, job->blk_len);
+	state->ldata[lane_idx].job_in_lane = job;
+	state->unused_lanes[grp] >>= LANE_LENGTH_SHIFT;
+	state->num_lanes_inuse++;
+}
+
+static XXH64_JOB *xxh64_mb_mgr_free_lane(XXH64_MB_JOB_MGR *state)
+{
+	int i;
+	XXH64_JOB *ret = NULL;
+
+	for (i = 0; i < state->max_lanes_inuse; i++) {
+		if (LANE_IS_FINISHED(state, i)) {
+			int grp = i / 8;
+
+			state->unused_lanes[grp] <<= 8;
+			state->unused_lanes[grp] |= i;
+			state->num_lanes_inuse--;
+			ret = state->ldata[i].job_in_lane;
+			ret->status = STS_COMPLETED;
+			state->ldata[i].job_in_lane = NULL;
+			break;
+		}
+	}
+	return ret;
+}
+
+XXH64_JOB *xxh64_mb_mgr_submit_sve(XXH64_MB_JOB_MGR *state, XXH64_JOB *job)
+{
+	int lane_idx;
+	XXH64_JOB *ret;
+
+	// add job into lanes
+	xxh64_mb_mgr_insert_job(state, job);
+
+	ret = xxh64_mb_mgr_free_lane(state);
+	if (ret)
+		goto out;
+	// submit will wait data ready in all lanes
+	if (state->num_lanes_inuse < state->max_lanes_inuse) {
+		ret = NULL;
+		goto out;
+	}
+	lane_idx = xxh64_mb_mgr_do_jobs(state);
+	ret = xxh64_mb_mgr_free_lane(state);
+out:
+	return ret;
+}
+
+XXH64_JOB *xxh64_mb_mgr_flush_sve(XXH64_MB_JOB_MGR *state)
+{
+	XXH64_JOB *ret;
+
+	ret = xxh64_mb_mgr_free_lane(state);
+	if (ret)
+		return ret;
+
+	xxh64_mb_mgr_do_jobs(state);
+	return xxh64_mb_mgr_free_lane(state);
+}

@@ -51,13 +51,14 @@ extern "C" {
 #endif
 
 #define XXH32_DIGEST_NWORDS	4
-#define XXH32_MAX_LANES		32
+#define XXH32_MAX_LANES		64	// for SVE2048
 #define XXH32_BLOCK_SIZE	256	// for SVE2048
 #define XXH32_LOG2_BLOCK_SIZE	8	// for SVE2048
 
 #define XXH64_DIGEST_NWORDS	4
-#define XXH64_MAX_LANES		16
-#define XXH64_BLOCK_SIZE	64
+#define XXH64_MAX_LANES		32	// for SVE2048
+#define XXH64_BLOCK_SIZE	256	// for SVE2048
+#define XXH64_LOG2_BLOCK_SIZE	8	// for SVE2048
 
 typedef uint32_t xxh32_digest_array[XXH32_DIGEST_NWORDS][XXH32_MAX_LANES];
 typedef uint64_t xxh64_digest_array[XXH64_DIGEST_NWORDS][XXH64_MAX_LANES];
@@ -124,12 +125,11 @@ typedef struct {
 	XXH32_JOB      job;             // Must be at struct offset 0.
 	HASH_CTX_STS   status;          //!< Context status flag
 	HASH_CTX_ERROR error;           //!< Context error flag
-	uint64_t       total_length;    //!< Running counter of length processed for this CTX's job
+	size_t         total_length;    //!< Running counter of length processed for this CTX's job
 	const void*    incoming_buffer; //!< pointer to data input buffer for this CTX's job
 	uint32_t       incoming_buffer_length; //!< length of buffer for this job in bytes.
 	uint8_t        partial_block_buffer[XXH32_BLOCK_SIZE * 2]; //!< CTX partial blocks
 	uint32_t       partial_block_buffer_length;
-	//uint32_t       v[4];            //!< Accumulator lanes
 	uint64_t       region_start;    //!<
 	uint64_t       region_end;      //!<
 	uint32_t       large_len;       //!< Whether the hash is >=16
@@ -144,8 +144,9 @@ typedef struct {
 
 typedef struct {
 	uint8_t*  buffer;       //!< pointer to data buffer for this job
-	uint32_t  len;          //!< length of buffer for this job in blocks.
-	DECLARE_ALIGNED(uint64_t result_digest[XXH64_DIGEST_NWORDS],64);
+	uint32_t  blk_len;          //!< length of buffer for this job in blocks.
+	DECLARE_ALIGNED(uint64_t digest[XXH64_DIGEST_NWORDS],64);
+	uint64_t  result_digest;//!< final digest
 	JOB_STS   status;       //!< output job status
 	void*     user_data;    //!< pointer for user's job-related data
 } XXH64_JOB;
@@ -167,13 +168,14 @@ typedef struct {
 
 typedef struct {
 	XXH64_MB_ARGS_X16 args;
-	uint32_t lens[XXH64_MAX_LANES];
+	XXH64_LANE_DATA ldata[XXH64_MAX_LANES];
 	/*
 	 * each nibble is index (0...31) of unused lanes,
 	 * nibble 4 or 8 is set to F as a flag.
 	 */
-	uint64_t unused_lanes[8];
-	XXH64_LANE_DATA ldata[XXH64_MAX_LANES];
+	uint64_t unused_lanes[4];
+	uint32_t lens[XXH64_MAX_LANES];
+	uint32_t max_lanes_inuse;
 	uint32_t num_lanes_inuse;
 } XXH64_MB_JOB_MGR;
 
@@ -191,11 +193,12 @@ typedef struct {
 	XXH64_JOB      job;             // Must be at struct offset 0.
 	HASH_CTX_STS   status;          //!< Context status flag
 	HASH_CTX_ERROR error;           //!< Context error flag
-	uint64_t       total_length;    //!< Running counter of length processed for this CTX's job
+	size_t         total_length;    //!< Running counter of length processed for this CTX's job
 	const void*    incoming_buffer; //!< pointer to data input buffer for this CTX's job
 	uint32_t       incoming_buffer_length; //!< length of buffer for this job in bytes.
 	uint8_t        partial_block_buffer[XXH64_BLOCK_SIZE * 2]; //!< CTX partial blocks
 	uint32_t       partial_block_buffer_length;
+	uint64_t       seed;		//!< Seed value
 	void*          user_data;       //!< pointer for user to keep any job-related data
 } XXH64_HASH_CTX;
 
@@ -237,6 +240,38 @@ XXH32_HASH_CTX* xxh32_ctx_mgr_submit(XXH32_HASH_CTX_MGR* mgr,
  * @returns NULL if no jobs to complete or pointer to jobs structure.
  */
 XXH32_HASH_CTX* xxh32_ctx_mgr_flush(XXH32_HASH_CTX_MGR* mgr);
+
+/**
+ * @brief Initialize the XXH64 multi-buffer manager structure.
+ *
+ * @param mgr	Structure holding context level state info
+ * @returns void
+ */
+void xxh64_ctx_mgr_init(XXH64_HASH_CTX_MGR* mgr);
+
+/**
+ * @brief  Submit a new XXH64 job to the multi-buffer manager.
+ *
+ * @param  mgr Structure holding context level state info
+ * @param  ctx Structure holding ctx job info
+ * @param  buffer Pointer to buffer to be processed
+ * @param  len Length of buffer (in bytes) to be processed
+ * @param  flags Input flag specifying job type (first, update, last or entire)
+ * @returns NULL if no jobs complete or pointer to jobs structure.
+ */
+XXH64_HASH_CTX* xxh64_ctx_mgr_submit(XXH64_HASH_CTX_MGR* mgr,
+				     XXH64_HASH_CTX* ctx,
+				     const void* buffer,
+				     uint32_t len,
+				     HASH_CTX_FLAG flags);
+
+/**
+ * @brief Finish all submitted XXH64 jobs and return when complete.
+ *
+ * @param mgr	Structure holding context level state info
+ * @returns NULL if no jobs to complete or pointer to jobs structure.
+ */
+XXH64_HASH_CTX* xxh64_ctx_mgr_flush(XXH64_HASH_CTX_MGR* mgr);
 
 #ifdef __cplusplus
 }

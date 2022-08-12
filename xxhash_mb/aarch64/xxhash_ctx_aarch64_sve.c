@@ -37,6 +37,12 @@
 #define PRIME32_4		0x27D4EB2FU
 #define PRIME32_5		0x165667B1U
 
+#define PRIME64_1		0x9E3779B185EBCA87ULL
+#define PRIME64_2		0xC2B2AE3D27D4EB4FULL
+#define PRIME64_3		0x165667B19E3779F9ULL
+#define PRIME64_4		0x85EBCA77C2B2AE63ULL
+#define PRIME64_5		0x27D4EB2F165667C5ULL
+
 #define XXH_rotl32(x, r)	(((x) << (r)) | ((x) >> (32 - (r))))
 #define XXH_rotl64(x, r)	(((x) << (r)) | ((x) >> (64 - (r))))
 
@@ -339,4 +345,284 @@ static XXH32_HASH_CTX *xxh32_ctx_mgr_resubmit(XXH32_HASH_CTX_MGR *mgr,
 	}
 
 	return NULL;
+}
+
+static uint64_t xxh64_round(uint64_t acc, const uint64_t input)
+{
+	acc += input * PRIME64_2;
+	acc = XXH_rotl64(acc, 31);
+	acc *= PRIME64_1;
+	return acc;
+}
+
+static uint64_t xxh64_merge_round(uint64_t acc, uint64_t val)
+{
+	val = xxh64_round(0, val);
+	acc ^= val;
+	acc = acc * PRIME64_1 + PRIME64_4;
+	return acc;
+}
+
+static inline void xxh64_hash_init_digest(XXH64_HASH_CTX *ctx)
+{
+	ctx->job.digest[0] = ctx->seed + PRIME64_1 + PRIME64_2;
+	ctx->job.digest[1] = ctx->seed + PRIME64_2;
+	ctx->job.digest[2] = ctx->seed;
+	ctx->job.digest[3] = ctx->seed - PRIME64_1;
+}
+
+void xxh64_ctx_mgr_init_sve(XXH64_HASH_CTX_MGR *mgr)
+{
+	xxh64_mb_mgr_init_sve(&mgr->mgr);
+}
+
+static void xxh64_ctx_get_hash(XXH64_HASH_CTX *ctx,
+				const void *buffer,
+				uint32_t len)
+{
+	const uint8_t *p = (const uint8_t *)buffer;
+	const uint8_t *b_end = p + len;
+	uint64_t h64;
+
+	if (len >= 32) {
+		const uint8_t *const limit = b_end - 32;
+
+		do {
+			ctx->job.digest[0] = xxh64_round(ctx->job.digest[0],
+						*(uint64_t *)p);
+			p += 8;
+			ctx->job.digest[1] = xxh64_round(ctx->job.digest[1],
+						*(uint64_t *)p);
+			p += 8;
+			ctx->job.digest[2] = xxh64_round(ctx->job.digest[2],
+						*(uint64_t *)p);
+			p += 8;
+			ctx->job.digest[3] = xxh64_round(ctx->job.digest[3],
+						*(uint64_t *)p);
+			p += 8;
+		} while (p <= limit);
+		h64 = XXH_rotl64(ctx->job.digest[0], 1) +
+			XXH_rotl64(ctx->job.digest[1], 7) +
+			XXH_rotl64(ctx->job.digest[2], 12) +
+			XXH_rotl64(ctx->job.digest[3], 18);
+	} else if ((len % 32 < 32) && (ctx->total_length >= 256)) {
+		h64 = XXH_rotl64(ctx->job.digest[0], 1) +
+			XXH_rotl64(ctx->job.digest[1], 7) +
+			XXH_rotl64(ctx->job.digest[2], 12) +
+			XXH_rotl64(ctx->job.digest[3], 18);
+	} else
+		h64 = ctx->job.result_digest;
+
+	h64 += ctx->total_length;
+
+	while (p + 8 <= b_end) {
+		const uint64_t k1 = xxh64_round(0, *(uint64_t *)p);
+
+		h64 ^= k1;
+		h64 = XXH_rotl64(h64, 27) * PRIME64_1 + PRIME64_4;
+		p += 8;
+	}
+
+	if (p + 4 <= b_end) {
+		h64 ^= (uint64_t)(*(uint32_t *)p) * PRIME64_1;
+		h64 = XXH_rotl64(h64, 23) * PRIME64_2 + PRIME64_3;
+		p += 4;
+	}
+
+	while (p < b_end) {
+		h64 ^= (*p) * PRIME64_5;
+		h64 = XXH_rotl64(h64, 11) * PRIME64_1;
+		p++;
+	}
+
+	h64 ^= h64 >> 33;
+	h64 *= PRIME64_2;
+	h64 ^= h64 >> 29;
+	h64 *= PRIME64_3;
+	h64 ^= h64 >> 32;
+	ctx->job.result_digest = h64;
+}
+
+static XXH64_HASH_CTX *xxh64_ctx_mgr_resubmit(XXH64_HASH_CTX_MGR *mgr,
+						XXH64_HASH_CTX *ctx)
+{
+	while (ctx) {
+		if (ctx->status & HASH_CTX_STS_COMPLETE) {
+			// Clear PROCESSING bit
+			ctx->status = HASH_CTX_STS_COMPLETE;
+			return ctx;
+		}
+		// If the extra blocks are empty, begin hashing what remains
+		// in the user's buffer.
+		if (ctx->partial_block_buffer_length == 0 &&
+		    ctx->incoming_buffer_length) {
+			const void *buffer = ctx->incoming_buffer;
+			size_t len = ctx->incoming_buffer_length;
+
+			// Only entire blocks can be hashed. Copy remainder to
+			// extra blocks buffer.
+			size_t copy_len = len & (XXH64_BLOCK_SIZE - 1);
+			if (copy_len) {
+				len -= copy_len;
+				memcpy_varlen(ctx->partial_block_buffer,
+						((const char *)buffer + len),
+						copy_len);
+				ctx->partial_block_buffer_length = copy_len;
+			}
+			ctx->incoming_buffer_length = 0;
+
+			// len should be a multiple of the block size now
+			assert((len % XXH64_BLOCK_SIZE) == 0);
+
+			if (len) {
+				ctx->job.buffer = (uint8_t *)buffer;
+				ctx->job.blk_len = len >> XXH64_LOG2_BLOCK_SIZE;
+				ctx = (XXH64_HASH_CTX *)xxh64_mb_mgr_submit_sve(
+						&mgr->mgr,
+						&ctx->job);
+				continue;
+			}
+		}
+		// If the extra blocks are not empty, then we are either on the
+		// last block(s) or we need more user input before continuing.
+		if (ctx->status & HASH_CTX_STS_LAST) {
+			uint8_t *buf = ctx->partial_block_buffer;
+
+			ctx->status = HASH_CTX_STS_PROCESSING |
+					HASH_CTX_STS_COMPLETE;
+
+			ctx->job.buffer = buf;
+			if (ctx->total_length < 32) {
+				// Don't use ctx->job.digest[].
+				ctx->job.result_digest = ctx->seed + PRIME64_5;
+				xxh64_ctx_get_hash(ctx, buf,
+					ctx->partial_block_buffer_length);
+			} else {
+				if (ctx->total_length < XXH64_BLOCK_SIZE)
+					xxh64_ctx_get_hash(ctx, buf,
+						ctx->partial_block_buffer_length);
+				else {
+					ctx = (XXH64_HASH_CTX *)xxh64_mb_mgr_submit_sve(
+								&mgr->mgr,
+								&ctx->job);
+					xxh64_ctx_get_hash(ctx, buf, ctx->partial_block_buffer_length);
+				}
+			}
+			continue;
+		}
+
+		if (ctx)
+			ctx->status = HASH_CTX_STS_IDLE;
+		return ctx;
+	}
+	return NULL;
+}
+
+XXH64_HASH_CTX *xxh64_ctx_mgr_submit_sve(XXH64_HASH_CTX_MGR *mgr,
+					XXH64_HASH_CTX *ctx,
+					const void *buffer,
+					size_t len,
+					HASH_CTX_FLAG flags)
+{
+	if (flags & (~HASH_ENTIRE)) {
+		ctx->error = HASH_CTX_ERROR_INVALID_FLAGS;
+		return ctx;
+	}
+
+	if (ctx->status & HASH_CTX_STS_PROCESSING) {
+		// Cannot submit to a currently processing job.
+		ctx->error = HASH_CTX_ERROR_ALREADY_PROCESSING;
+		return ctx;
+	}
+
+	if ((ctx->status & HASH_CTX_STS_COMPLETE) && (!flags & HASH_FIRST)) {
+		// Cannot update a finished job.
+		ctx->error = HASH_CTX_ERROR_ALREADY_COMPLETED;
+		return ctx;
+	}
+
+	if (flags & HASH_FIRST) {
+		// Init digest
+		xxh64_hash_init_digest(ctx);
+
+		// Reset byte counter;
+		ctx->total_length = 0;
+
+		// Clear extra blocks
+		ctx->partial_block_buffer_length = 0;
+	}
+	// If we made it here, there were no errors during this call to submit
+	ctx->error = HASH_CTX_ERROR_NONE;
+
+	// Store buffer ptr info from user
+	ctx->incoming_buffer = buffer;
+	ctx->incoming_buffer_length = len;
+
+	// Store the user's request flags and mark this ctx as currently being
+	// processed.
+	ctx->status = (flags & HASH_LAST) ?
+		(HASH_CTX_STS) (HASH_CTX_STS_PROCESSING | HASH_CTX_STS_LAST) :
+		HASH_CTX_STS_PROCESSING;
+
+	// Advance byte counter
+	ctx->total_length += len;
+
+	// If there is anything currently buffered in the extra blocks, append
+	// to it until it contains a whole block.
+	// Or if the user's buffer contains less than a whole block, append as
+	// much as possible to the extra block.
+	if ((ctx->partial_block_buffer_length) | (len < XXH64_BLOCK_SIZE)) {
+		// Compute how many bytes to copy from user buffer into extra
+		// block
+		size_t copy_len;
+
+		copy_len = XXH64_BLOCK_SIZE - ctx->partial_block_buffer_length;
+		if (len < copy_len)
+			copy_len = len;
+
+		if (copy_len) {
+			// Copy and update relevant pointers and counters
+			memcpy_varlen(&ctx->partial_block_buffer
+					[ctx->partial_block_buffer_length],
+					buffer,
+					copy_len);
+			ctx->partial_block_buffer_length += copy_len;
+			ctx->incoming_buffer = (const void *)((uint64_t)buffer +
+					copy_len);
+			ctx->incoming_buffer_length = len - copy_len;
+		}
+		// The extra block should never contain more than 1 block here
+		assert(ctx->partial_block_buffer_length <= XXH64_BLOCK_SIZE);
+		// If the extra block buffer contains exactly 1 block, it can
+		// be hashed.
+		if (ctx->partial_block_buffer_length >= XXH64_BLOCK_SIZE) {
+			ctx->partial_block_buffer_length = 0;
+			ctx->job.buffer = ctx->partial_block_buffer;
+			ctx->job.blk_len = 1;
+			ctx = (XXH64_HASH_CTX *)xxh64_mb_mgr_submit_sve(
+					&mgr->mgr,
+					&ctx->job);
+		}
+	}
+	return xxh64_ctx_mgr_resubmit(mgr, ctx);
+}
+
+XXH64_HASH_CTX *xxh64_ctx_mgr_flush_sve(XXH64_HASH_CTX_MGR *mgr)
+{
+	XXH64_HASH_CTX *ctx;
+
+	while (1) {
+		ctx = (XXH64_HASH_CTX *)xxh64_mb_mgr_flush_sve(&mgr->mgr);
+		// If flush returned 0, there are no more jobs in flight.
+		if (!ctx)
+			return NULL;
+
+		// If flush returned a job, verify that it is safe to return to the user.
+		// If it is not ready, resubmit the job to finish processing.
+		ctx = xxh64_ctx_mgr_resubmit(mgr, ctx);
+		// If xxh64_ctx_mgr_resubmit returned a job, it is ready to be returned.
+		if (ctx)
+			return ctx;
+		// Otherwise, all jobs currently being managed by the HASH_CTX_MGR still need processing. Loop.
+	}
 }
