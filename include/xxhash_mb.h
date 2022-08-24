@@ -55,13 +55,13 @@ extern "C" {
 #define XXH32_BLOCK_SIZE	256	// for SVE2048
 #define XXH32_LOG2_BLOCK_SIZE	8	// for SVE2048
 
-#define XXH64_DIGEST_NWORDS	4
+#define XXH64_DIGEST_NDWORDS	4
 #define XXH64_MAX_LANES		32	// for SVE2048
 #define XXH64_BLOCK_SIZE	256	// for SVE2048
 #define XXH64_LOG2_BLOCK_SIZE	8	// for SVE2048
 
 typedef uint32_t xxh32_digest_array[XXH32_DIGEST_NWORDS][XXH32_MAX_LANES];
-typedef uint64_t xxh64_digest_array[XXH64_DIGEST_NWORDS][XXH64_MAX_LANES];
+typedef uint64_t xxh64_digest_array[XXH64_DIGEST_NDWORDS][XXH64_MAX_LANES];
 
 /** @brief Scheduler layer - Holds info describing a single XXH32 job for the
  *  multi-buffer manager
@@ -145,7 +145,7 @@ typedef struct {
 typedef struct {
 	uint8_t*  buffer;       //!< pointer to data buffer for this job
 	uint32_t  blk_len;          //!< length of buffer for this job in blocks.
-	DECLARE_ALIGNED(uint64_t digest[XXH64_DIGEST_NWORDS],64);
+	DECLARE_ALIGNED(uint64_t digest[XXH64_DIGEST_NDWORDS],64);
 	uint64_t  result_digest;//!< final digest
 	JOB_STS   status;       //!< output job status
 	void*     user_data;    //!< pointer for user's job-related data

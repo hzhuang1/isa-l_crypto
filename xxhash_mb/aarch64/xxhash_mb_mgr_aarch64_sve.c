@@ -330,30 +330,30 @@ void xxh64_mb_mgr_init_sve(XXH64_MB_JOB_MGR *state)
 {
 	unsigned int i;
 
-	state->max_lanes_inuse = xxh32_mb_sve_max_lanes();
+	state->max_lanes_inuse = xxh32_mb_sve_max_lanes() / 2;
 	switch (state->max_lanes_inuse) {
-	case 4:
+	case 2:
 		// SVE128
 		state->unused_lanes[0] = 0x7f7f7f7f7f7f0100;
 		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
 		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
 		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
 		break;
-	case 8:
+	case 4:
 		// SVE256
 		state->unused_lanes[0] = 0x7f7f7f7f03020100;
 		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
 		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
 		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
 		break;
-	case 16:
+	case 8:
 		// SVE512
 		state->unused_lanes[0] = 0x0706050403020100;
 		state->unused_lanes[1] = 0x7f7f7f7f7f7f7f7f;
 		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
 		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
 		break;
-	case 32:
+	case 16:
 		// SVE1024
 		// Each byte indicates a lane index that is from 0 to 15.
 		state->unused_lanes[0] = 0x0706050403020100;
@@ -361,7 +361,7 @@ void xxh64_mb_mgr_init_sve(XXH64_MB_JOB_MGR *state)
 		state->unused_lanes[2] = 0x7f7f7f7f7f7f7f7f;
 		state->unused_lanes[3] = 0x7f7f7f7f7f7f7f7f;
 		break;
-	case 64:
+	case 32:
 		// SVE2048
 		// Each byte indicates a lane index that is from 0 to 31.
 		state->unused_lanes[0] = 0x0706050403020100;

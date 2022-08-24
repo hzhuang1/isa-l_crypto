@@ -53,6 +53,9 @@ extern XXH32_JOB *xxh32_mb_mgr_flush_sve(XXH32_MB_JOB_MGR *state);
 
 static XXH32_HASH_CTX *xxh32_ctx_mgr_resubmit(XXH32_HASH_CTX_MGR *mgr,
 					      XXH32_HASH_CTX *ctx);
+extern void xxh64_mb_mgr_init_sve(XXH64_MB_JOB_MGR *state);
+extern XXH64_JOB *xxh64_mb_mgr_submit_sve(XXH64_MB_JOB_MGR *state, XXH64_JOB *job);
+extern XXH64_JOB *xxh64_mb_mgr_flush_sve(XXH64_MB_JOB_MGR *state);
 
 extern void dump_state(XXH32_MB_JOB_MGR *state);
 
