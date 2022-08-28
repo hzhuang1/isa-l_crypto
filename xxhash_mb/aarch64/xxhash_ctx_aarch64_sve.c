@@ -408,11 +408,19 @@ static void xxh64_ctx_get_hash(XXH64_HASH_CTX *ctx,
 			XXH_rotl64(ctx->job.digest[1], 7) +
 			XXH_rotl64(ctx->job.digest[2], 12) +
 			XXH_rotl64(ctx->job.digest[3], 18);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[0]);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[1]);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[2]);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[3]);
 	} else if ((len % 32 < 32) && (ctx->total_length >= 256)) {
 		h64 = XXH_rotl64(ctx->job.digest[0], 1) +
 			XXH_rotl64(ctx->job.digest[1], 7) +
 			XXH_rotl64(ctx->job.digest[2], 12) +
 			XXH_rotl64(ctx->job.digest[3], 18);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[0]);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[1]);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[2]);
+		h64 = xxh64_merge_round(h64, ctx->job.digest[3]);
 	} else
 		h64 = ctx->job.result_digest;
 

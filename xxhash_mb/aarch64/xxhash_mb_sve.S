@@ -769,6 +769,7 @@ xxh64_mb_sve:
         cmp     x11, x2
         bne     10b
         //ptrue   p1.b
+/*
         st1b    z5.b, p1, [x3]
         add     x3, x3, 32
         st1b    z6.b, p1, [x3]
@@ -777,6 +778,7 @@ xxh64_mb_sve:
         add     x3, x3, 32
         st1b    z8.b, p1, [x3]
         add     x3, x3, 32
+*/
 /*
 	ptrue	p1.b
 	st1b	z9.b, p1, [x3]

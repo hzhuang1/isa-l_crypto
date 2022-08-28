@@ -60,6 +60,7 @@
 extern int xxh32_mb_sve_max_lanes(void);
 extern void xxh32_mb_sve(XXH32_JOB **job_vec, int job_cnt, int block_cnt,
 			int overflow);
+extern void xxh64_mb_sve(XXH64_JOB **job_vec, int job_cnt, int block_cnt);
 
 void dump_state(XXH32_MB_JOB_MGR *state)
 {
@@ -416,7 +417,7 @@ static int xxh64_mb_mgr_do_jobs(XXH64_MB_JOB_MGR *state)
 	// Only block data could be accelerated by SVE instructions.
 	// Remained data should be handled in other routine.
 	blocks = min_len >> LANE_LENGTH_SHIFT;
-	//xxh64_mb_sve(job_vecs, job_cnt, blocks);
+	xxh64_mb_sve(job_vecs, job_cnt, blocks);
 
 	for (i = 0; i < state->max_lanes_inuse; i++) {
 		if (LANE_IS_NOT_FINISHED(state, i)) {
