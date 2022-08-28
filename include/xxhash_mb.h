@@ -145,7 +145,7 @@ typedef struct {
 typedef struct {
 	uint8_t*  buffer;       //!< pointer to data buffer for this job
 	uint32_t  blk_len;          //!< length of buffer for this job in blocks.
-	DECLARE_ALIGNED(uint64_t digest[XXH64_DIGEST_NDWORDS],64);
+	DECLARE_ALIGNED(uint64_t digest[XXH64_DIGEST_NDWORDS],16);
 	uint64_t  result_digest;//!< final digest
 	JOB_STS   status;       //!< output job status
 	void*     user_data;    //!< pointer for user's job-related data
