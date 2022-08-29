@@ -701,15 +701,24 @@ out:
 	return ret;
 }
 
+#define QUICK_TEST
+
 int main(void)
 {
 	char str[64];
-	int i, len;
+	int i, len, cnt;
+
+
+#ifdef QUICK_TEST
+	cnt = 8;
+#else
+	cnt = 15;
+#endif
 
 	printf("Test for XXH32:\n");
 	run_single_ctx32();
 	run_multi_ctx32(2);
-	for (i = 0, len = TEST_PERF_LEN; i < 15; i++) {
+	for (i = 0, len = TEST_PERF_LEN; i < cnt; i++) {
 		if (len >= 1024 * 1024)
 			sprintf(str, "%dMB", len >> 20);
 		else if (len >= 1024)
@@ -728,7 +737,7 @@ int main(void)
 	printf("Test for XXH64:\n");
 	run_single_ctx64();
 	run_multi_ctx64(2);
-	for (i = 0, len = TEST_PERF_LEN; i < 15; i++) {
+	for (i = 0, len = TEST_PERF_LEN; i < cnt; i++) {
 		if (len >= 1024 * 1024)
 			sprintf(str, "%dMB", len >> 20);
 		else if (len >= 1024)
