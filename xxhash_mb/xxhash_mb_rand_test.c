@@ -325,7 +325,7 @@ out:
 	return ret;
 }
 
-int run_multi_ctx(int job_cnt)
+int run_multi_ctx32(int job_cnt)
 {
 	struct buf_list *listpool[16];
 	XXH32_HASH_CTX_MGR *mgr;
@@ -381,7 +381,63 @@ out:
 	return ret;
 }
 
-int run_sb_perf(int job_cnt, int len)
+int run_multi_ctx64(int job_cnt)
+{
+	struct buf_list *listpool[16];
+	XXH64_HASH_CTX_MGR *mgr;
+	XXH64_HASH_CTX ctxpool[16];
+	int ret, i, flags;
+	int buf_cnt = 1;
+
+	printf("%s:\n", __func__);
+	if (job_cnt < 1)
+		job_cnt = 1;
+	if (job_cnt > 16)
+		job_cnt = 16;
+	for (i = 0; i < job_cnt; i++) {
+		listpool[i] = alloc_buffer(buf_cnt, 0);
+		if (!listpool[i]) {
+			fprintf(stderr, "Fail to allocate a buffer list!\n");
+			ret = -ENOMEM;
+			goto out;
+		}
+		fill_rand_buffer(listpool[i]);
+	}
+
+	mgr = aligned_alloc(16, sizeof(XXH64_HASH_CTX_MGR));
+	if (!mgr) {
+		fprintf(stderr, "Fail to allocate mgr!\n");
+		ret = -ENOMEM;
+		goto out_mgr;
+	}
+	xxh64_ctx_mgr_init(mgr);
+	for (i = 0; i < job_cnt; i++) {
+		hash_ctx_init(&ctxpool[i]);
+		flags = HASH_ENTIRE;
+		xxh64_ctx_mgr_submit(mgr, &ctxpool[i], listpool[i][0].addr,
+				listpool[i][0].size, flags);
+	}
+	//xxh64_ctx_mgr_flush(mgr);
+	while (xxh64_ctx_mgr_flush(mgr));
+	for (i = 0; i < job_cnt; i++) {
+		printf("[%d] digest:0x%lx\n", i, ctxpool[i].job.result_digest);
+		ret = verify_digest64(listpool[i], ctxpool[i].job.result_digest);
+		if (ret < 0)
+			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
+	}
+	free(mgr);
+	for (i = 0; i < job_cnt; i++)
+		free_buffer(listpool[i]);
+	return 0;
+out_mgr:
+	i = job_cnt;
+out:
+	for (; i > 0; i--)
+		free_buffer(listpool[i - 1]);
+	return ret;
+}
+
+int run_sb_perf32(int job_cnt, int len)
 {
 	struct buf_list *list = NULL, *p = NULL;
 	int ret, i, t, max_lanes;
@@ -436,7 +492,62 @@ out:
 	return ret;
 }
 
-int run_mb_perf(int job_cnt, int len)
+int run_sb_perf64(int job_cnt, int len)
+{
+	struct buf_list *list = NULL, *p = NULL;
+	int ret, i, t, max_lanes;
+	int buf_cnt = 1;
+	struct perf start, stop;
+	XXH64_state_t state;
+	int updated = 0;
+
+	if (job_cnt < 1)
+		job_cnt = 1;
+	max_lanes = xxh32_mb_sve_max_lanes() / 2;
+	if (job_cnt > max_lanes)
+		job_cnt = max_lanes;
+	printf("%s: job_cnt:%d, max_lanes:%d\n", __func__, job_cnt, max_lanes);
+
+	list = alloc_buffer(buf_cnt, len);
+	if (!list) {
+		fprintf(stderr, "Fail to allocate a buffer list!\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+	fill_rand_buffer(list);
+
+	perf_start(&start);
+	for (t = 0; t < TEST_PERF_LOOPS; t++) {
+		for (i = 0; i < job_cnt; i++) {
+			p = list;
+			updated = 0;
+			XXH64_reset(&state, 0);
+			while (p) {
+				if (p->addr) {
+					updated |= 1;
+					XXH64_update(&state, p->addr, p->size);
+				}
+				p = p->next;
+			}
+			if (!updated) {
+				fprintf(stderr, "Fail to get digest value!\n");
+				goto out;
+			}
+			XXH64_digest(&state);
+		}
+	}
+	perf_stop(&stop);
+	perf_print(stop, start, (long long)len * i * t);
+
+	free_buffer(list);
+	return 0;
+out:
+	if (list)
+		free_buffer(list);
+	return ret;
+}
+
+int run_mb_perf32(int job_cnt, int len)
 {
 	struct buf_list *listpool[16];
 	XXH32_HASH_CTX_MGR *mgr;
@@ -513,15 +624,91 @@ out:
 	return ret;
 }
 
+int run_mb_perf64(int job_cnt, int len)
+{
+	struct buf_list *listpool[16];
+	XXH64_HASH_CTX_MGR *mgr;
+	XXH64_HASH_CTX ctxpool[16];
+	int ret = 0, i, t, flags, max_lanes;
+	int buf_cnt = 1;
+	struct perf start, stop;
+
+	if (job_cnt < 1)
+		job_cnt = 1;
+	max_lanes = xxh32_mb_sve_max_lanes() / 2;
+	if (job_cnt > max_lanes)
+		job_cnt = max_lanes;
+	printf("%s: job_cnt:%d, max_lanes:%d\n", __func__, job_cnt, max_lanes);
+	for (i = 0; i < job_cnt; i++) {
+		listpool[i] = alloc_buffer(buf_cnt, len);
+		if (!listpool[i]) {
+			fprintf(stderr, "Fail to allocate a buffer list!\n");
+			ret = -ENOMEM;
+			goto out;
+		}
+		fill_rand_buffer(listpool[i]);
+	}
+	for (i = 1; i < job_cnt; i++) {
+		if (((uint64_t)listpool[i - 1]->addr & SEGMENT_MASK) !=
+		    ((uint64_t)listpool[i]->addr & SEGMENT_MASK)) {
+			printf("All job buffers are NOT in the same 4GB "
+				"memory slot. It could impact performance.\n");
+			break;
+		}
+	}
+
+	mgr = aligned_alloc(16, sizeof(XXH64_HASH_CTX_MGR));
+	if (!mgr) {
+		fprintf(stderr, "Fail to allocate mgr!\n");
+		ret = -ENOMEM;
+		goto out_mgr;
+	}
+	xxh64_ctx_mgr_init(mgr);
+	perf_start(&start);
+	for (t = 0; t < TEST_PERF_LOOPS; t++) {
+		for (i = 0; i < job_cnt; i++) {
+			hash_ctx_init(&ctxpool[i]);
+			ctxpool[i].seed = 0;
+			flags = HASH_ENTIRE;
+			xxh64_ctx_mgr_submit(mgr,
+					&ctxpool[i],
+					listpool[i][0].addr,
+					listpool[i][0].size,
+					flags);
+		}
+		while (xxh64_ctx_mgr_flush(mgr));
+	}
+	perf_stop(&stop);
+	perf_print(stop, start, (long long)len * i * t);
+
+	for (i = 0; i < job_cnt; i++) {
+		//printf("[%d] digest:0x%x\n", i, ctxpool[i].job.result_digest);
+		ret = verify_digest64(listpool[i], ctxpool[i].job.result_digest);
+		if (ret < 0) {
+			fprintf(stderr, "Fail to verify listpool[%d] (%d)\n", i, ret);
+			break;
+		}
+	}
+	free(mgr);
+	for (i = 0; i < job_cnt; i++)
+		free_buffer(listpool[i]);
+	return 0;
+out_mgr:
+	i = job_cnt;
+out:
+	for (; i > 0; i--)
+		free_buffer(listpool[i - 1]);
+	return ret;
+}
+
 int main(void)
 {
 	char str[64];
-	int i;
+	int i, len;
 
-	//run_single_ctx();
-	//run_multi_ctx(2);
-	run_single_ctx64();
-#if 0
+	printf("Test for XXH32:\n");
+	run_single_ctx32();
+	run_multi_ctx32(2);
 	for (i = 0, len = TEST_PERF_LEN; i < 15; i++) {
 		if (len >= 1024 * 1024)
 			sprintf(str, "%dMB", len >> 20);
@@ -530,14 +717,31 @@ int main(void)
 		else
 			sprintf(str, "%dB", len);
 		printf("Test data buffer with %s size:\n", str);
-		run_sb_perf(16, len);
-		run_mb_perf(1, len);
-		run_mb_perf(2, len);
-		run_mb_perf(4, len);
-		run_mb_perf(8, len);
-		run_mb_perf(16, len);
+		run_sb_perf32(16, len);
+		run_mb_perf32(1, len);
+		run_mb_perf32(2, len);
+		run_mb_perf32(4, len);
+		run_mb_perf32(8, len);
+		run_mb_perf32(16, len);
 		len <<= 1;
 	}
-#endif
+	printf("Test for XXH64:\n");
+	run_single_ctx64();
+	run_multi_ctx64(2);
+	for (i = 0, len = TEST_PERF_LEN; i < 15; i++) {
+		if (len >= 1024 * 1024)
+			sprintf(str, "%dMB", len >> 20);
+		else if (len >= 1024)
+			sprintf(str, "%dKB", len >> 10);
+		else
+			sprintf(str, "%dB", len);
+		printf("Test data buffer with %s size:\n", str);
+		run_mb_perf32(4, len);
+		run_sb_perf64(4, len);
+		run_mb_perf64(1, len);
+		run_mb_perf64(2, len);
+		run_mb_perf64(4, len);
+		len <<= 1;
+	}
 	return 0;
 }
