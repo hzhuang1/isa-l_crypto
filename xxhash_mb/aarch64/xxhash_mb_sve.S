@@ -618,7 +618,7 @@
 	bne	130b
 .endm
 
-.macro xxh64_single  jobs:req, job_cnt:req, blk_idx:req, buf:req, didx:req, prm1:req, prm2:req, prm4:req, s1:req, s2:req, s3:req, s4:req, in1:req, in2:req, in3:req, in4:req, src:req, dst:req, tmp:req, cnt:req
+.macro xxh64_single  jobs:req, job_cnt:req, blk_idx:req, buf:req, didx:req, prm1:req, prm2:req, s1:req, s2:req, s3:req, s4:req, in1:req, in2:req, in3:req, in4:req, src:req, dst:req, tmp:req, cnt:req
 	xxh64_load_data_from_jobs  \jobs, \job_cnt, \blk_idx, \buf, \src, \dst, \tmp, \cnt/*, \in1, \in2, \in3, \in4 */
 	// Each lane loads 8 * 4 = 32 (bytes) data.
 	// 256 / 32 = 8
@@ -740,14 +740,14 @@ xxh64_mb_sve:
 	whilelo p0.d, wzr, w1
 	ptrue	p1.b
 	// xxh64_init_seed_index(idx, tmp);
-	// Z3: index of seed
-	// Z4: index of data
-	xxh64_init_seed_index  z3, x6
-	xxh64_init_data_index  z4, x6
+	// Z2: index of seed
+	// Z3: index of data
+	xxh64_init_seed_index  z2, x6
+	xxh64_init_data_index  z3, x6
 	
 	xxh64_load_seed_from_jobs  x0, x1, x4, x7, x8, x6, x10
 	// Load sparse seeds into vector registers [Z5 - Z8].
-	xxh64_sparse_load  x4, z3, z5, z6, z7, z8, x6
+	xxh64_sparse_load  x4, z2, z4, z5, z6, z7, x6
 	
 	// x8: PRIME address
 	adr     x8, XXH64_PRIME
@@ -755,44 +755,19 @@ xxh64_mb_sve:
 	ldr     x6, [x8], 8
 	mov     z0.d, p1/m, x6
 	// x6 & Z1: PRIME64_02
-	ldr     x6, [x8], 16
+	ldr     x6, [x8]
 	mov     z1.d, p1/m, x6
-        // x6 & Z2: PRIME64_04
-        ldr     x6, [x8]
-        mov     z2.d, p1/m, x6
 
         // x11: block index
         mov     x11, #0
 10:
-        xxh64_single  x0, x1, x11, x5, z4, z0, z1, z2, z5, z6, z7, z8, z9, z10, z11, z12, x7, x8, x6, x10
+        xxh64_single  x0, x1, x11, x5, z3, z0, z1, z4, z5, z6, z7, z8, z9, z10, z11, x7, x8, x6, x10
         add     x11, x11, #1
         cmp     x11, x2
         bne     10b
-        //ptrue   p1.b
-/*
-        st1b    z5.b, p1, [x3]
-        add     x3, x3, 32
-        st1b    z6.b, p1, [x3]
-        add     x3, x3, 32
-        st1b    z7.b, p1, [x3]
-        add     x3, x3, 32
-        st1b    z8.b, p1, [x3]
-        add     x3, x3, 32
-*/
-/*
-	ptrue	p1.b
-	st1b	z9.b, p1, [x3]
-	add	x3, x3, 32
-	st1b	z10.b, p1, [x3]
-	add	x3, x3, 32
-	st1b	z11.b, p1, [x3]
-	add	x3, x3, 32
-	st1b	z12.b, p1, [x3]
-	add	x3, x3, 32
-*/
 
 	// Save sparse seeds from vector registers to a memory block.
-	xxh64_sparse_save  x4, z3, z5, z6, z7, z8, x6
+	xxh64_sparse_save  x4, z2, z4, z5, z6, z7, x6
 	// Save sparse seeds back into job_vec.
 	xxh64_save_seed_to_jobs  x0, x1, x4, x7, x8, x6, x10
 
