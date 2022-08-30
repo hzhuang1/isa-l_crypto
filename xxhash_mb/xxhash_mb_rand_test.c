@@ -701,7 +701,7 @@ out:
 	return ret;
 }
 
-#define QUICK_TEST
+//#define QUICK_TEST
 
 int main(void)
 {
@@ -745,11 +745,11 @@ int main(void)
 		else
 			sprintf(str, "%dB", len);
 		printf("Test data buffer with %s size:\n", str);
-		run_mb_perf32(4, len);
-		run_sb_perf64(4, len);
+		run_sb_perf64(16, len);
 		run_mb_perf64(1, len);
 		run_mb_perf64(2, len);
 		run_mb_perf64(4, len);
+		run_mb_perf64(8, len);
 		len <<= 1;
 	}
 	return 0;
