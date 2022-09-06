@@ -447,7 +447,7 @@
 	index   \idx\().d, #0, \tmp
 .endm
 
-/*
+// Use address as index.
 .macro xxh64_init_sparse_index  idx:req, job_vec:req, job_cnt:req, buffer:req, src:req, dst:req, m_addr:req, cnt:req
 	mov	\src, \job_vec
 	mov	\dst, \buffer
@@ -460,8 +460,8 @@
 	str	\m_addr, [\dst], #8
 	subs	\cnt, \cnt, 1
 	bne	300b
+	ld1d	\idx\().d, p0/z, [\buffer]
 .endm
-*/
 
 // rotate left
 // Accessed Predicate registers: p0
@@ -573,13 +573,13 @@
 // Accessed predicate registers: p0
 .macro xxh64_sparse_load  buf:req, idx:req, in1:req, in2:req, in3:req, in4:req, tmp:req
 	mov	\tmp, \buf
-	ld1d	\in1\().d, p0/z, [\tmp, \idx\().d, UXTW 0]
+	ld1d	\in1\().d, p0/z, [\tmp, \idx\().d]
 	add	\tmp, \tmp, #8
-	ld1d	\in2\().d, p0/z, [\tmp, \idx\().d, UXTW 0]
+	ld1d	\in2\().d, p0/z, [\tmp, \idx\().d]
 	add	\tmp, \tmp, #8
-	ld1d	\in3\().d, p0/z, [\tmp, \idx\().d, UXTW 0]
+	ld1d	\in3\().d, p0/z, [\tmp, \idx\().d]
 	add	\tmp, \tmp, #8
-	ld1d	\in4\().d, p0/z, [\tmp, \idx\().d, UXTW 0]
+	ld1d	\in4\().d, p0/z, [\tmp, \idx\().d]
 	add	\tmp, \tmp, #8
 .endm
 
@@ -619,13 +619,28 @@
 .endm
 
 .macro xxh64_single  jobs:req, job_cnt:req, blk_idx:req, buf:req, didx:req, prm1:req, prm2:req, s1:req, s2:req, s3:req, s4:req, in1:req, in2:req, in3:req, in4:req, src:req, dst:req, tmp:req, cnt:req
-	xxh64_load_data_from_jobs  \jobs, \job_cnt, \blk_idx, \buf, \src, \dst, \tmp, \cnt/*, \in1, \in2, \in3, \in4 */
+/*
+	xxh64_load_data_from_jobs  \jobs, \job_cnt, \blk_idx, \buf, \src, \dst, \tmp, \cnt
 	// Each lane loads 8 * 4 = 32 (bytes) data.
 	// 256 / 32 = 8
 	mov	\cnt, #8
 	mov	\dst, \buf
 150:
 	// load data
+	xxh64_sparse_load  \dst, \didx, \in1, \in2, \in3, \in4, \tmp
+	mov	\dst, \tmp
+	xxh64_round_x4  \s1, \s2, \s3, \s4, \in1, \in2, \in3, \in4, \prm1, \prm2
+        subs	\cnt, \cnt, #1
+        bne	150b
+*/
+	// Each lane loads 8 * 4 = 32 (bytes) data.
+	// 256 / 32 = 8
+	mov	\cnt, #8
+	#mov	\dst, 0
+	// dst: block address in job[i].buffer (offset: 256-byte)
+	#add	\dst, \dst, \blk_idx, lsl #8
+	mov	\dst, \blk_idx, lsl #8
+150:
 	xxh64_sparse_load  \dst, \didx, \in1, \in2, \in3, \in4, \tmp
 	mov	\dst, \tmp
 	xxh64_round_x4  \s1, \s2, \s3, \s4, \in1, \in2, \in3, \in4, \prm1, \prm2
@@ -743,7 +758,8 @@ xxh64_mb_sve:
 	// Z2: index of seed
 	// Z3: index of data
 	xxh64_init_seed_index  z2, x6
-	xxh64_init_data_index  z3, x6
+	//xxh64_init_data_index  z3, x6
+	xxh64_init_sparse_index  z3, x0, x1, x5, x7, x8, x9, x10
 	
 	xxh64_load_seed_from_jobs  x0, x1, x4, x7, x8, x6, x10
 	// Load sparse seeds into vector registers [Z5 - Z8].
