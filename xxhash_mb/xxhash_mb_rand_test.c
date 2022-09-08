@@ -173,6 +173,10 @@ static void fill_rand_buffer(struct buf_list *list)
 	}
 }
 
+#ifdef DEBUG_NO_TAIL_CALC
+static int verify_digest32(struct buf_list *list, uint32_t digest) {}
+static int verify_digest64(struct buf_list *list, uint64_t digest) {}
+#else
 static int verify_digest32(struct buf_list *list, uint32_t digest)
 {
 	XXH32_state_t state;
@@ -228,6 +232,7 @@ static int verify_digest64(struct buf_list *list, uint64_t digest)
 	printf("Input digest vs verified digest: %lx VS %lx\n", digest, h64);
 	return -EINVAL;
 }
+#endif
 
 struct ctx_user_data {
 	uint32_t	seed;

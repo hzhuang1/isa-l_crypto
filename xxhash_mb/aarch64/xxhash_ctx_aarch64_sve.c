@@ -85,6 +85,13 @@ void xxh32_ctx_mgr_init_sve(XXH32_HASH_CTX_MGR *mgr)
 	xxh32_mb_mgr_init_sve(&mgr->mgr);
 }
 
+#ifdef DEBUG_NO_TAIL_CALC
+static void xxh32_ctx_get_hash(XXH32_HASH_CTX *ctx,
+				const void *buffer,
+				uint32_t len)
+{
+}
+#else
 static void xxh32_ctx_get_hash(XXH32_HASH_CTX *ctx,
 				const void *buffer,
 				uint32_t len)
@@ -143,6 +150,7 @@ static void xxh32_ctx_get_hash(XXH32_HASH_CTX *ctx,
 	h32 ^= h32 >> 16;
 	ctx->job.result_digest = h32;
 }
+#endif
 
 XXH32_HASH_CTX *xxh32_ctx_mgr_submit_sve(XXH32_HASH_CTX_MGR *mgr,
 					 XXH32_HASH_CTX *ctx,
